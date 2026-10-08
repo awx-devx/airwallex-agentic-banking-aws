@@ -144,6 +144,31 @@ def test_tenant_isolation_on_reads_and_proposals(k7, h):
     assert h.sfn.calls == []
 
 
+def test_a_borrower_finds_its_own_loan_without_naming_it(k7, h):
+    """On 8 Oct 2026 the deployed agent asked a borrower for its loan id. A read with no
+    loan_id lists the caller's own loans, and with one loan returns its position."""
+    out = h.call("read_borrower_position", {}, tenant_id="tenant-a")
+    assert "error" not in out, out
+    data = out["untrusted_data"]
+    assert data["your_loan_ids"] == ["loan-a"]
+    assert data["loan_id"] == "loan-a"
+    for other in ("loan-b", "loan-c"):
+        assert other not in repr(out), other
+    named = h.call("read_borrower_position", {"loan_id": "loan-a"}, tenant_id="tenant-a")
+    assert named["untrusted_data"]["your_loan_ids"] == ["loan-a"]
+    (spec,) = [t for t in TOOLS if t.name == "propose_disburse_advance"]
+    assert "call read_borrower_position without a loan_id" in spec.description
+
+
+@pytest.mark.parametrize("letter", ["a", "b", "c"])
+def test_each_borrower_sees_only_its_own_loan_id(k7, h, letter):
+    out = h.call("read_borrower_position", {}, tenant_id=f"tenant-{letter}")
+    assert "error" not in out, out
+    assert out["untrusted_data"]["your_loan_ids"] == [f"loan-{letter}"]
+    for other in {"a", "b", "c"} - {letter}:
+        assert f"loan-{other}" not in repr(out), other
+
+
 def test_a_re_proposal_after_the_execution_closed_reports_existing(k7, h):
     args = {"loan_id": "loan-c"}
     first = h.call("propose_disburse_advance", args, tenant_id="tenant-c")
@@ -179,6 +204,34 @@ def _platform_figures_world(k7, capital):
         return h.call(tool, args, token=token)
 
     return w, h, call
+
+
+def _says_amount_not_chosen(reasons):
+    return any("borrower cannot choose the amount" in r for r in reasons)
+
+
+@pytest.mark.parametrize(
+    ("path", "capital"),
+    [("full", "33333.00"), ("partial", "17777.00"), ("delayed", "13000.00")],
+)
+def test_disbursement_result_says_the_borrower_cannot_choose_the_amount(k7, path, capital):
+    """On 8 Oct 2026 a borrower asked for 2,000 USD, got the 8,000 USD tranche, and the agent
+    invented a reason. The tool and every result say the amount is not the borrower's."""
+    (spec,) = [t for t in TOOLS if t.name == "propose_disburse_advance"]
+    assert "cannot choose the amount" in spec.description
+    _w, _h, call = _platform_figures_world(k7, capital)
+    out = call("propose_disburse_advance", {"loan_id": "loan-c"})
+    assert "error" not in out, out
+    assert _says_amount_not_chosen(out["reasons"]), (path, out["reasons"])
+
+
+def test_resent_tranche_result_says_the_borrower_cannot_choose_the_amount(k7):
+    w, h, _call = _platform_figures_world(k7, "33333.00")
+    token = h.issuer.token(tenant_id="tenant-a", now=w.fake.now().timestamp())
+    out = h.call("propose_disburse_advance", {"loan_id": "loan-a"}, token=token)
+    assert "error" not in out, out
+    assert out["summary"]["computed_by_code"]["resend"] is True, out
+    assert _says_amount_not_chosen(out["reasons"]), out["reasons"]
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,7 @@
 """Kit 1's tool surface through the real ToolDispatcher (awx_agent.testing.KitToolHarness).
 
 For every tool in TOOLS: the approval binds to the proposal hash; tenant isolation holds (kit 1
-runs on the platform's own account, whatever tenant a caller claims); model input never chooses
+runs on the platform's own account and serves platform callers only); model input never chooses
 an amount, an account or a request_id; and a re-proposal after the execution closed reports the
 existing proposal.
 """
@@ -135,9 +135,16 @@ def test_execute_plan_binds_the_locked_quote_and_exact_sell(make_env):
 
 @pytest.mark.parametrize("tool", READS + PROPOSES)
 def test_a_tenant_claim_never_moves_kit1_off_the_platform_account(tool, make_env):
+    """Kit 1 serves platform callers only: another tenant's claim, with a tenants row or
+    without one, is refused before anything is read or proposed."""
     env = scenario(tool, make_env)
     h = harness(env, tenants={"tenant-x": "acct_X"})
-    out = h.call(tool, ARGS[tool], tenant_id="tenant-x")
+    for claim in ("tenant-x", "k5:operator"):  # a row; no row at all
+        refused = h.call(tool, ARGS[tool], tenant_id=claim)
+        assert refused["error"]["code"] == "TENANT_SCOPE", (claim, refused)
+    assert h.reader.calls == []
+    assert h.executions == []
+    out = h.call(tool, ARGS[tool])  # the platform caller
     assert "error" not in out, out
     if tool != "read_obligations":  # read_obligations reads only the kit store
         assert h.reader.calls
@@ -154,7 +161,9 @@ def test_a_connected_accounts_wallet_is_never_read_by_kit1(make_env):
     acct = env.fake.add_connected_account("poc-i1-other", {})
     env.fake.credit("EUR", "999999", account=acct)
     h = harness(env, tenants={"tenant-x": acct})
-    out = h.call("read_balances", {}, tenant_id="tenant-x")
+    refused = h.call("read_balances", {}, tenant_id="tenant-x")
+    assert refused["error"]["code"] == "TENANT_SCOPE"
+    out = h.call("read_balances", {})  # the platform caller
     eur = {b["currency"]: b for b in out["untrusted_data"]["balances"]}["EUR"]
     assert eur["available"]["amount"] == "2000.00"  # the platform's, not the tenant's
 

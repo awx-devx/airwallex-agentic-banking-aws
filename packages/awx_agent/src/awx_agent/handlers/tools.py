@@ -2,8 +2,9 @@
 
 Identity: the interceptor writes the caller's access token under IDENTITY_FIELD; this handler
 verifies it again (signature, issuer, client, token_use, expiry) before doing anything, so a
-direct invocation with a forged event gets nothing. Tenant: kits 1-4 run as the platform tenant,
-kits 5-8 as the caller's tenant_id claim, resolved server-side through the tenants table.
+direct invocation with a forged event gets nothing. Tenant: kits 1-4 serve platform callers only
+and run as the platform tenant (any other tenant_id claim, or none, is refused with TENANT_SCOPE);
+kits 5-8 run as the caller's tenant_id claim, resolved server-side through the tenants table.
 Nothing about identity or tenant comes from model input.
 
 READ: run the kit's READS function with the engine's own pure PolicyContext
@@ -50,7 +51,6 @@ from awx_spine_aws import codec, engine
 from ..identity import (
     APPROVER_GROUP,
     IDENTITY_FIELD,
-    PLATFORM_TENANT,
     REQUESTER_GROUP,
     CallerIdentity,
     IdentityError,
@@ -207,21 +207,12 @@ class ToolDispatcher:
                 caller.require_group(REQUESTER_GROUP, APPROVER_GROUP)
             else:
                 caller.require_group(REQUESTER_GROUP)
-            # The caller's tenant row must be this kit's, checked before the tool looks at
-            # its arguments, so a caller of another kit learns nothing about this kit's tools.
+            # Checked before the tool looks at its arguments, so a caller of another kit learns
+            # nothing about this kit's tools. Kits 1-4 accept only a caller whose claim is
+            # exactly "platform" (run_tenant raises TenantScopeViolation for anything else, with
+            # or without a tenants-table row); kits 5-8 resolve the claim's row in this kit,
+            # which refuses an unknown tenant and a row bound to another kit.
             run_as = caller.run_tenant(self.kit)
-            if run_as == PLATFORM_TENANT and caller.tenant_id not in (None, PLATFORM_TENANT):
-                # Kits 1-4 run as the platform and ignore a tenant claim, but a claim whose
-                # row is bound to another kit (k6:operator, a kit 5-8 customer) is that kit's
-                # caller and is refused here, as every other kit refuses it. A claim with no
-                # row at all is ignored.
-                # Every resolver raises TenantScopeViolation("unknown tenant") for no row; the
-                # type is kept (Step Functions catchers match its name), so match the message.
-                try:
-                    self.env.resolve_tenant(caller.tenant_id)
-                except TenantScopeViolation as exc:
-                    if exc.args[:1] != ("unknown tenant",):
-                        raise
             tenant = self.env.resolve_tenant(run_as)
             args = check_arguments(spec, event)
             if spec.kind is ToolKind.READ:
@@ -311,11 +302,12 @@ class ToolDispatcher:
         if outcome:
             state = outcome
         elif execution_status == "RUNNING":
-            state = "IN_PROGRESS"  # awaiting approval or executing; the approval API knows which
+            state = "IN_PROGRESS"  # an AUTO run is executing; any other may await approval
         else:
             state = f"EXECUTION_{execution_status}"
         out = _summary(tool, self.kit, proposal, retry=True)
         out["status"] = f"EXISTING_PROPOSAL_{state}"
+        out["status_message"] = _existing_message(state, proposal.risk_tier.value)
         out["execution_status"] = execution_status
         out["proposal_state"] = state
         return out
@@ -344,6 +336,7 @@ def _summary(tool: str, kit: str, proposal: Proposal, *, retry: bool) -> dict[st
         "origin": proposal.origin.value,
         "reasons": list(proposal.reasons),
         "status": _status_for(proposal.risk_tier.value),
+        "status_message": _status_message(proposal.risk_tier.value),
         "existing_proposal": retry,
         "expires_at": to_jsonable(proposal.expires_at),
         "summary": {
@@ -360,6 +353,40 @@ def _status_for(tier: str) -> str:
         "AUTO": "SUBMITTED_NO_APPROVAL_NEEDED",
         "BLOCKED": "BLOCKED_BY_POLICY",
     }.get(tier, "AWAITING_APPROVAL")
+
+
+# What each status means, in words the model can repeat to the user. An AUTO proposal's run
+# starts without approval when the tool returns, but the workflow rechecks policy before its
+# first step, so the message claims neither that it waits nor that money has moved.
+AUTO_RECHECK = (
+    "The workflow rechecks policy before its first step and may still stop it. This result "
+    "does not say whether money has moved."
+)
+STATUS_MESSAGES = {
+    "AUTO": f"The run has started without approval. {AUTO_RECHECK}",
+    "BLOCKED": "Policy blocked this proposal. Nothing has run and nothing will run.",
+}
+AWAITING_MESSAGE = (
+    "Nothing has run yet. The proposal waits for approval by someone other than the proposer."
+)
+
+
+def _status_message(tier: str) -> str:
+    return STATUS_MESSAGES.get(tier, AWAITING_MESSAGE)
+
+
+def _existing_message(state: str, tier: str) -> str:
+    if state == "IN_PROGRESS" and tier == "AUTO":
+        return (
+            "This proposal already exists and its run is executing; it needs no approval. "
+            + AUTO_RECHECK
+        )
+    if state == "IN_PROGRESS":
+        return (
+            "This proposal already exists and its run is in progress: it is waiting for "
+            "approval or executing, and this result does not say which."
+        )
+    return f"This proposal already exists. Its recorded state is {state}."
 
 
 def _error(code: str, message: str) -> dict[str, Any]:

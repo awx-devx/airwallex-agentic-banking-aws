@@ -15,18 +15,23 @@ deployed AWS stacks.
 
 | Kit | What it shows | Offline tests | Live sandbox | Deployed stack |
 |---|---|---|---|---|
-| [1 Adaptive Treasury Controller](kits/k1_treasury/README.md) | A fee-inclusive FX (foreign exchange) plan checked against the reserve floor across the whole plan, with rate locks and quote expiry | pass | yes | agent: plan, rate lock, approval, conversion and supplier payment |
-| [2 Intent-Bound Purchase Agent](kits/k2_purchase/README.md) | Card controls bound to a purchase decision, with per-transaction and cumulative limits and a limit-boundary test | pass | yes | agent: card issue and limit tests |
-| [3 Payment Ops Incident Commander](kits/k3_incident/README.md) | Replacing a failed transfer only once the provider reports it failed, behind a duplicate lock | pass | yes | agent: replace a returned payment, with approval |
+| [1 Adaptive Treasury Controller](kits/k1_treasury/README.md) | A fee-inclusive FX (foreign exchange) plan checked against the reserve floor across the whole plan, with rate locks and quote expiry | pass | yes | agent: plan, rate lock, approval, conversion and supplier payment; `execute_plan` at AUTO (8 October 2026) |
+| [2 Intent-Bound Purchase Agent](kits/k2_purchase/README.md) | Card controls bound to a purchase decision, with per-transaction and cumulative limits and a limit-boundary test | pass | yes | agent: `issue_card` and a limit test, each approved (8 October 2026) |
+| [3 Payment Ops Incident Commander](kits/k3_incident/README.md) | Replacing a failed transfer only once the provider reports it failed, behind a duplicate lock | pass | yes | agent: staged original, simulated failure and replacement, each approved (8 October 2026) |
 | [4 Dispute Response Agent](kits/k4_dispute/README.md) | Dispute economics and deadlines, an evidence pack, and evidence that carries a prompt injection | pass | no: needs online payments enabled on the sandbox account | deployed, not exercised |
-| [5 Platform Spend Controller](kits/k5_platform_spend/README.md) | A platform capital ledger and reserve allocator for connected accounts, with tenant mapping | pass | yes, except one card authorisation the sandbox left pending | agent: request refused for a login with no kit 5 tenant |
-| [6 Multi-Employer Payroll Executor](kits/k6_payroll/README.md) | Per-employer pricing and funding, one child run per employer, a wallet-delta postcondition | pass | yes | agent: read tool |
-| [7 Portfolio Lending Agent](kits/k7_lending/README.md) | A loan subledger and repayment formula, advances and weekly collection | pass | yes | agent: advance (operator approval) and weekly repayment |
-| [8 Marketplace Settlement Agent](kits/k8_settlement/README.md) | A seller reserve ledger, the cycle identity check, receivables and recovery | pass | yes | seller payout started with `awx-deploy trigger` and approved by the seller's own approver; agent: read tool |
+| [5 Platform Spend Controller](kits/k5_platform_spend/README.md) | A platform capital ledger and reserve allocator for connected accounts, with tenant mapping | pass | yes, except one card authorisation the sandbox left pending | agent: shortfall and a 25 USD bridge approved by the kit 5 operator (8 October 2026) |
+| [6 Multi-Employer Payroll Executor](kits/k6_payroll/README.md) | Per-employer pricing and funding, one child run per employer, a wallet-delta postcondition | pass | yes | agent: a payroll for one employer, approved (8 October 2026) |
+| [7 Portfolio Lending Agent](kits/k7_lending/README.md) | A loan subledger and repayment formula, advances and weekly collection | pass | yes | agent: an advance approved by the kit 7 operator; a weekly collection started with `awx-deploy trigger` (8 October 2026) |
+| [8 Marketplace Settlement Agent](kits/k8_settlement/README.md) | A seller reserve ledger, the cycle identity check, receivables and recovery | pass | yes | seller payout started with `awx-deploy trigger` and approved by the kit 8 operator (8 October 2026); agent: read tool |
 
 The deployed security checks (`scripts/deployed_security_checks.py`) and a set of
-approval-visibility checks passed against the deployment on 7 October 2026. Kit 8 settlement
-is approved by the kit operator. That approval path has not run against a deployment.
+approval-visibility checks passed against the deployment on 7 October 2026. On 8 October
+2026 check 5 failed on a deployment from a fresh clone into a new account. After the fix, every
+deployed check passed on that deployment, including check 5c. Kit 8 settlement
+is approved by the kit operator. On 7 October the seller's own approver approved a deployed
+payout, before the operator rule existed. On 8 October 2026, on a deployment from a fresh
+clone into a new account, the seller's approver was refused and the kit 8 operator approved a
+3,800 USD payout with 1,000 USD held in reserve.
 
 ## Design principles
 
@@ -95,18 +100,28 @@ make help      # list every target
 make sync      # create the uv workspace environment
 make hooks     # run the secret scan on every commit (git config core.hooksPath .githooks)
 make check     # lint, secret scan and offline tests (no network once synced)
+make synth-test   # cdk synth and the synth-time security tests
 make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com   # synthesise every stack
 ```
 
-`make synth` needs no AWS credentials, but downloads the pinned linux/arm64 wheels for the
+`make check` and `make synth-test` take about 4 to 5 minutes each, and pytest prints only
+dots while it runs. `make synth` needs no AWS credentials, but downloads the pinned
+linux/arm64 wheels for the
 agent-plane Lambda and Runtime assets. [docs/testing.md](docs/testing.md) covers the other test
 layers.
 
 ## Deploying
 
-`make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>` deploys every stack to
-ap-southeast-2. Before the kits can run you seed the Airwallex secret, create demo users and
-load each kit's state with `awx-deploy`.
+```sh
+make bootstrap ACCOUNT=<12-digit id>                       # once per account
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>    # every stack, to ap-southeast-2
+```
+
+`cdk deploy` asks a person at a terminal to approve AWS Identity and Access Management (IAM)
+changes. In a shell with no terminal
+(a continuous integration (CI) job, a coding agent) add
+`CDK_ARGS="--require-approval never"` to `make deploy`. Before the kits can run you seed the
+Airwallex secret, create demo users and load each kit's state with `awx-deploy`.
 [docs/deployment.md](docs/deployment.md) is the full runbook.
 
 ## Documentation

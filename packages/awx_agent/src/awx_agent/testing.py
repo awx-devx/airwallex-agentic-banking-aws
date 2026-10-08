@@ -5,7 +5,7 @@
 
     h = KitToolHarness.for_kit("k1", port=FakeAirwallex(balances=...))
     seed_book(h.store(), DEMO_BOOK)              # kit state for the platform tenant
-    out = h.call("read_balances", {})            # a requester, kits 1-4 run as "platform"
+    out = h.call("read_balances", {})            # a "platform" requester (kits 1-4)
     out = h.call("propose_execute_plan", {...})  # -> proposal_id, risk_tier, status ...
     h.executions                                 # decoded StartExecution inputs
 
@@ -43,7 +43,13 @@ from awx_common.tenancy import StaticTenantResolver, bind_read, resolve_in_kit
 from awx_spine_aws import codec, engine
 
 from .handlers.tools import GatewayToolEnv, ToolDispatcher
-from .identity import APPROVER_GROUP, IDENTITY_FIELD, PLATFORM_TENANT, REQUESTER_GROUP
+from .identity import (
+    APPROVER_GROUP,
+    CONNECTED_ACCOUNT_KITS,
+    IDENTITY_FIELD,
+    PLATFORM_TENANT,
+    REQUESTER_GROUP,
+)
 from .jwtverify import CognitoVerifier, JwksCache
 from .registry import TOOL_TARGET_DELIMITER, KitTools, load_kit_tools
 
@@ -119,7 +125,7 @@ class TokenIssuer:
             "cognito:groups": list(groups),
             "iat": t - 5,
             "exp": t + 3600,
-            **({"tenant_id": tenant_id} if tenant_id else {}),
+            **({"tenant_id": tenant_id} if tenant_id is not None else {}),
             **claims,
         }
         head = _seg(json.dumps({"alg": "RS256", "kid": KID}).encode())
@@ -302,7 +308,10 @@ class KitToolHarness:
         token: str | None = None,
     ) -> dict[str, Any]:
         """Call one tool as the Gateway would: `<kit>___<tool>` with the verified token in
-        the identity field. Returns the tool's JSON result (or {"error": {...}})."""
+        the identity field. Returns the tool's JSON result (or {"error": {...}}).
+
+        With no `tenant_id` the caller carries the kit's default claim (see `token`). Pass
+        `token=h.issuer.token()` to send a caller with no tenant claim at all."""
         event = dict(arguments)
         event[IDENTITY_FIELD] = token or self.token(user, groups=groups, tenant_id=tenant_id)
         return self.dispatcher.dispatch(f"{self.kit}{TOOL_TARGET_DELIMITER}{tool}", event)
@@ -316,7 +325,12 @@ class KitToolHarness:
         **claims: Any,
     ) -> str:
         """A token issued at the harness clock's time, so it verifies against that clock.
-        Pass `now=` (a timestamp) to issue at another time, e.g. an expired token."""
+        Pass `now=` (a timestamp) to issue at another time, e.g. an expired token.
+
+        With no `tenant_id`, a kit 1-4 caller carries the "platform" claim (kits 1-4 serve
+        platform callers only) and a kit 5-8 caller carries none."""
+        if tenant_id is None and self.kit not in CONNECTED_ACCOUNT_KITS:
+            tenant_id = PLATFORM_TENANT
         claims.setdefault("now", self.clock().timestamp())
         return self.issuer.token(sub, groups=groups, tenant_id=tenant_id, **claims)
 

@@ -133,12 +133,18 @@ def test_approval_binds_to_the_proposal_hash(tool):
 
 @pytest.mark.parametrize("tool", READS + PROPOSES)
 def test_a_tenant_claim_never_moves_kit3_off_the_platform_account(tool):
-    """Kit 3 runs on the platform's own account (kits 1-4): whatever tenant the caller claims,
-    every read goes to the platform reader with no x-on-behalf-of, and every proposal is the
+    """Kit 3 runs on the platform's own account (kits 1-4) and serves platform callers only:
+    another tenant's claim, with a row or none, is refused before anything is read. A platform
+    caller's reads go to the platform reader with no x-on-behalf-of, and every proposal is the
     platform's."""
     kit, oid = scenario(tool)
     h = harness(kit, tenants={"tenant-x": "acct_X"})
-    out = h.call(tool, args_for(tool, kit, oid), tenant_id="tenant-x")
+    for claim in ("tenant-x", "k5:operator"):
+        refused = h.call(tool, args_for(tool, kit, oid), tenant_id=claim)
+        assert refused["error"]["code"] == "TENANT_SCOPE", (claim, refused)
+    assert h.reader.calls == []
+    assert h.executions == []
+    out = h.call(tool, args_for(tool, kit, oid))
     assert "error" not in out, out
     assert h.reader.calls
     assert all(c["payload"]["tenant_id"] == "platform" for c in h.reader.calls)

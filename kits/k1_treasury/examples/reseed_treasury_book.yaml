@@ -1,0 +1,16 @@
+# Args for `awx-deploy run k1 seed_treasury_book`: the seed_treasury_book args of deploy/k1.yaml
+# with "replace": true and one more obligation, ob-office-usd (450.00 USD LOCAL).
+#
+# A re-seed moves the dates only. A paid obligation stays PAID on this deployment, because its
+# obligation lock survives a replace, so execute_plan pays each obligation id once per
+# deployment. To run the payment again, map an obligation that has not been paid: here
+# ob-office-usd. K1_BEN_OFFICE_USD may be the US LOCAL beneficiary you passed as K1_BEN_SHIPPING.
+# Pass the same --var values as for deploy/k1.yaml, plus K1_BEN_OFFICE_USD. Without
+# scenario_start the dates start at the next whole hour. Keep this file in step with
+# deploy/k1.yaml (a test checks it).
+replace: true
+beneficiaries:
+  ob-supplier-eur: "${K1_BEN_SUPPLIER_EUR}"
+  ob-shipping: "${K1_BEN_SHIPPING}"
+  ob-office-usd: "${K1_BEN_OFFICE_USD}"
+book_version: demo-2

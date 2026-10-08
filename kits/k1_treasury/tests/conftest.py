@@ -17,7 +17,8 @@ in test_faults.py and test_release_races.py.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -360,3 +361,48 @@ def clone_store(store: InMemoryKitStore) -> InMemoryKitStore:
     other = InMemoryKitStore()
     other._items = dict(store._items)  # test-only copy of the in-memory rows
     return other
+
+
+# --- live-run evidence ------------------------------------------------------------------------
+
+
+def explain(what: Any) -> str:
+    """The whole failure detail as one JSON string. pytest prints a string assertion message
+    in full, while a dict or tuple message is shortened to `...` unless you run with `-l`."""
+    import json
+
+    from awx_common import to_jsonable
+
+    try:
+        value = to_jsonable(what)
+    except (TypeError, ValueError):  # never let the explanation hide the failure it explains
+        value = what
+    return json.dumps(value, indent=2, sort_keys=True, default=str)
+
+
+@contextmanager
+def evidence_file(seen: dict[str, Any], path: str | None) -> Iterator[None]:
+    """Write `seen` to `path` when the block ends, whether it passed or failed. A failed run
+    records `outcome: failed` and the error, so the evidence exists when it is most needed."""
+    try:
+        yield
+    except BaseException as exc:
+        seen["outcome"] = "failed"
+        seen["failure"] = f"{type(exc).__name__}: {exc}"
+        raise
+    else:
+        seen["outcome"] = "passed"
+    finally:
+        if path:
+            with open(path, "w") as fh:
+                fh.write(explain(seen) + "\n")
+
+
+@pytest.fixture(name="explain")
+def explain_fixture() -> Callable[[Any], str]:
+    return explain
+
+
+@pytest.fixture(name="evidence_file")
+def evidence_file_fixture() -> Callable[[dict[str, Any], str | None], Any]:
+    return evidence_file

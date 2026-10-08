@@ -164,7 +164,7 @@ def test_the_harness_issuer_signs_at_the_harness_clock_without_now():
 
     then = datetime.now(UTC) - timedelta(minutes=10)
     h = _k1_harness(lambda: then)
-    out = h.call("read_balances", {}, token=h.issuer.token())
+    out = h.call("read_balances", {}, token=h.issuer.token(tenant_id="platform"))
     assert "untrusted_data" in out, out
     assert h.issuer.clock() == then.timestamp()
 
@@ -202,7 +202,7 @@ def test_a_platform_kit_refuses_a_tenant_bound_to_another_kit(kit):
     assert h.sfn.calls == []
 
 
-def test_the_platform_demo_users_and_unrowed_claims_still_reach_kit1():
+def test_the_platform_demo_users_reach_kit1_and_unrowed_or_missing_claims_do_not():
     from awx_k1_treasury.book import DEMO_BOOK, seed_book
 
     port = FakeAirwallex(
@@ -210,6 +210,11 @@ def test_the_platform_demo_users_and_unrowed_claims_still_reach_kit1():
     )
     h = KitToolHarness.for_kit("k1", port=port)
     seed_book(h.store(), DEMO_BOOK)
-    for tenant in ("platform", None, "no-such-row"):
+    for tenant in ("platform", None):  # None: the harness's kit 1-4 default, "platform"
         out = h.call("read_balances", {}, tenant_id=tenant)
         assert "untrusted_data" in out, (tenant, out)
+    calls = len(h.reader.calls)
+    for tok in (h.token(tenant_id="no-such-row"), h.issuer.token()):  # unrowed; no claim
+        out = h.call("read_balances", {}, token=tok)
+        assert out["error"]["code"] == "TENANT_SCOPE", out
+    assert len(h.reader.calls) == calls

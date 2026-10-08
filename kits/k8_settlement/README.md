@@ -179,11 +179,17 @@ ids and ends with nothing NEW or PENDING. See [docs/testing.md](../../docs/testi
   which was left unapproved.
 - Deployed stack, 7 Oct 2026: a payout run started with `awx-deploy trigger` and approved by
   the seller's own approver through the approval API settled 3,800 USD to one seller with
-  1,000 USD held as reserve. Settlement is approved by the kit 8 operator; that path has not
-  run live (below).
+  1,000 USD held as reserve. That deployment predates the rule that the kit 8 operator approves
+  settlement.
 - Deployed agent, 7 Oct 2026: a read tool returned the seller's sandbox figures.
+- Deployed stack, 8 Oct 2026, on a deployment from a fresh clone into a new account:
+  `awx-deploy trigger k8 settle_seller_cycle` for one seller's cycle needed SINGLE approval (a
+  material reserve increase of 1,000 USD) from the `k8:operator` approver. The seller's own
+  approver was refused with HTTP 403 and the kit 8 operator approved it. The run SUCCEEDED,
+  paying 3,800 USD to the seller with 1,000 USD held in reserve, and the agent, signed in as
+  that seller, read the balance and ledger.
 
-Not validated live: the operator-approved settlement path, recovery charges, the resolve tool
+Not validated live: recovery charges, the resolve tool
 and watches, and SUSPENDED or FAILED end states (the sandbox cannot produce them).
 
 ## Assumptions and limits

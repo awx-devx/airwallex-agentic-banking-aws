@@ -5,7 +5,9 @@ every read tool answers NOT_CONFIGURED and every proposal BLOCKS until a person 
 `seed_deployed` writes the book and mints the M2 book id (`book.seed_book`) from REAL Airwallex
 beneficiary ids: the demo book's `ben-poc-k1-*` ids are placeholders and are refused. Only the
 obligations given a beneficiary are kept, so nothing can be paid to a beneficiary that does not
-exist.
+exist. Given a `start`, every due date and expected receipt moves by one offset so the scenario
+starts that day (`book.moved_to`): the demo book's fixed October 2026 dates would otherwise sit
+outside the 72-hour window `read_obligations` reports on.
 
 The operator command `seed_treasury_book` (commands.py) calls it; `awx-deploy apply` runs that
 command from `deploy/k1.yaml`, and `kits/k1_treasury/scripts/seed_deployed_book.py` is a
@@ -17,12 +19,21 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 from awx_common import ReadRequest
 from awx_common.store import KitStore, VersionConflict
 
-from .book import BOOK_KEY, DEMO_BOOK, TreasuryBook, load_book, load_book_id, seed_book
+from .book import (
+    BOOK_KEY,
+    DEMO_BOOK,
+    TreasuryBook,
+    load_book,
+    load_book_id,
+    moved_to,
+    seed_book,
+)
 from .locks import LockState, lock_key, read_lock
 
 _FINAL = (LockState.PAID, LockState.RELEASED)
@@ -40,8 +51,10 @@ def build_seed_book(
     *,
     template: TreasuryBook = DEMO_BOOK,
     book_version: str,
+    start: datetime | None = None,
 ) -> TreasuryBook:
-    """The template book with each named obligation pointed at its real beneficiary."""
+    """The template book with each named obligation pointed at its real beneficiary and, given
+    `start`, its dates moved so the scenario starts then."""
     if not beneficiaries:
         raise SeedRefused("name at least one obligation=beneficiary_id")
     unknown = sorted(set(beneficiaries) - {o.obligation_id for o in template.obligations})
@@ -55,7 +68,8 @@ def build_seed_book(
         for o in template.obligations
         if o.obligation_id in beneficiaries
     )
-    return replace(template, book_version=book_version, obligations=obligations)
+    book = replace(template, book_version=book_version, obligations=obligations)
+    return moved_to(book, start) if start is not None else book
 
 
 def seed_deployed(
@@ -66,6 +80,7 @@ def seed_deployed(
     read: Callable[[ReadRequest], Mapping[str, Any]] | None = None,
     template: TreasuryBook = DEMO_BOOK,
     replace_existing: bool = False,
+    start: datetime | None = None,
 ) -> dict[str, Any]:
     """Write the book into `store` (deployed: DynamoDbKitStore for kit k1, tenant platform).
 
@@ -80,7 +95,7 @@ def seed_deployed(
     if checked is not None and not replace_existing:
         raise SeedRefused("a treasury book is already seeded; pass replace_existing to reseed")
     before = load_book(store)
-    book = build_seed_book(beneficiaries, template=template, book_version=book_version)
+    book = build_seed_book(beneficiaries, template=template, book_version=book_version, start=start)
     if read is not None:
         for oid, ben in sorted(beneficiaries.items()):
             try:
@@ -119,6 +134,7 @@ def seed_deployed(
         "book_id": load_book_id(store),
         "book_version": book.book_version,
         "obligations": {o.obligation_id: o.beneficiary_id for o in book.obligations},
+        "due": {o.obligation_id: o.due_at.isoformat() for o in book.obligations},
         "open_locks": open_locks,
         "dropped_with_open_lock": dropped,
     }

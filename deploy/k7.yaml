@@ -6,7 +6,11 @@
 #   K7_ACCT_LOAN_A, K7_ACCT_LOAN_C       acct_... of poc-i7-loan-a / poc-i7-loan-c
 #   K7_FIRST_PERIOD                      the demo book's first DEMO300S-<n> collection period:
 #                                        period n starts at 2026-01-01T00:00Z + n x 300 s
-#                                        (kits/k7_lending/DESIGN.md "DEMO collection periods")
+#                                        (kits/k7_lending/DESIGN.md "DEMO collection periods").
+#                                        Use the period running now, printed by
+#                                        python3 -c "import time; print(f'DEMO300S-{(int(time.time()) - 1767225600) // 300}')"
+#                                        (1767225600 is 2026-01-01T00:00Z). An earlier n changes
+#                                        nothing; a later n delays the first collection.
 #   K7_DEPOSIT_ID                        the platform-wallet deposit made for the capital, done
 #                                        first as a separate step under `flock /tmp/awx-sandbox.lock`
 # k7:operator is the kit's operator tenants row (kit k7, role operator, no connected account).

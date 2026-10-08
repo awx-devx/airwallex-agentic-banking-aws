@@ -16,13 +16,23 @@ from awx_common import Money
 
 from .book import TransferMethod
 
-# SWIFT payout fees per currency, taken from the same wallet; LOCAL payouts are free. This is
-# configuration, not fact: the sandbox charged EUR 6.21 on EUR SWIFT of 1.00 and 100.00
-# (awx_spine FAKE-FIDELITY.md, [tr-swift-100], fee_paid_by PAYER, SHARED), while the guide says
-# a flat EUR 12.85. The sandbox value is the default. No fee is verified for any other currency, so
-# a SWIFT payout elsewhere escalates instead of guessing.
-SANDBOX_SWIFT_FEES: Mapping[str, Money] = {"EUR": Money.of("6.21", "EUR")}
-GUIDE_SWIFT_FEES: Mapping[str, Money] = {"EUR": Money.of("12.85", "EUR")}  # reference only
+# Every SWIFT payout fee on record, per currency. The fee comes out of the payout's own wallet;
+# LOCAL payouts are free.
+# - The hackathon builder guide: a flat EUR 12.85 per EUR SWIFT payout.
+# - The sandbox charged EUR 6.21 on EUR SWIFT of 1.00 and 100.00 (awx_spine FAKE-FIDELITY.md,
+#   [tr-swift-100], fee_paid_by PAYER, SHARED).
+# - On 8 Oct 2026 the sandbox charged EUR 6.22 on some 10.00 EUR SWIFT payouts and 6.21 on the
+#   rest, so a wallet sized to its floor at 6.21 ended 0.01 EUR under it after paying.
+RECORDED_SWIFT_FEES: Mapping[str, tuple[Money, ...]] = {
+    "EUR": (Money.of("12.85", "EUR"), Money.of("6.21", "EUR"), Money.of("6.22", "EUR")),
+}
+# The fee the plan sizes each SWIFT payout at: the largest fee on record, the rule kit 6 adopted
+# after its 2,000 EUR finding. A wallet at its floor then ends at or above it whichever recorded
+# fee the provider charges. Sizing only: the postcondition reads the real balances. No fee is on
+# record for any other currency, so a SWIFT payout elsewhere escalates instead of guessing.
+SWIFT_FEES: Mapping[str, Money] = {
+    cur: max(fees, key=lambda m: m.amount) for cur, fees in RECORDED_SWIFT_FEES.items()
+}
 
 
 class K1Error(Exception):
@@ -42,7 +52,7 @@ class BadProviderData(K1Error):
 
 
 def payout_fee(
-    method: TransferMethod, currency: str, fees: Mapping[str, Money] = SANDBOX_SWIFT_FEES
+    method: TransferMethod, currency: str, fees: Mapping[str, Money] = SWIFT_FEES
 ) -> Money:
     if method is TransferMethod.LOCAL:
         return Money.zero(currency)
@@ -55,7 +65,7 @@ def payout_fee(
 
 
 def payout_need(
-    amount: Money, method: TransferMethod, fees: Mapping[str, Money] = SANDBOX_SWIFT_FEES
+    amount: Money, method: TransferMethod, fees: Mapping[str, Money] = SWIFT_FEES
 ) -> Money:
     """What the wallet loses for one payout: the amount plus its flat fee."""
     return amount + payout_fee(method, amount.currency, fees)

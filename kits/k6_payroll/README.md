@@ -14,7 +14,8 @@ The diagram source is `docs/architecture/k6_payroll.drawio`.
 
 ## Flow
 1. A person asks the agent to run a pay period's payroll; the model copies the payroll file
-   into the tool input, naming employers and contractors by platform code.
+   into the tool input, naming employers and contractors by platform code. The format is under
+   [Payroll input](#payroll-input).
 2. `propose_lock_rates` starts `awx-k6-lock_rates` (AUTO, no approval). One child
    (`awx-k6-lock_rates-child`) per employer that pays in another currency takes a foreign
    exchange (FX) quote on that employer's account and stores it as the rate lock.
@@ -44,6 +45,38 @@ The diagram source is `docs/architecture/k6_payroll.drawio`.
 | Reads the payroll file into the tool input, names employers and contractors by platform code, explains shortfalls and statuses | Every amount, fee, FX size, sell cap, funding decision, request_id, connected account (resolved server-side from the employer code), tenant check, approval tier and postcondition |
 
 The model never chooses an account, an amount or a request_id; the tools refuse such fields.
+
+## Payroll input
+
+`propose_lock_rates` and `propose_run_payroll` take the same input, one pay period for one or
+more employers. [examples/payroll-2026-W41.json](examples/payroll-2026-W41.json) is a sample
+with every supported corridor; paste it into the chat with the request ("lock rates and run
+this payroll"). The agent has no tool that lists employers, so name the employer codes in
+the request when you write your own payroll.
+
+| Field | Value |
+|---|---|
+| `pay_period` | an ISO (International Organization for Standardization) week, `YYYY-Www`, such as `2026-W41` |
+| `employers[].employer` | the employer's platform code: `a`, `b` or `c` in `deploy/k6.yaml` (tenants `k6:employer:a` and so on) |
+| `employers[].funding_currency` | the currency of the employer's wallet that pays, `USD` in the demo |
+| `employers[].contractors[]` | 1 to 50 contractors, each listed once per employer |
+| `contractor` | the contractor's code: lower-case letters, digits and `-`, up to 24 characters |
+| `first_name`, `last_name` | the contractor's name, up to 60 characters each |
+| `amount` | `{"amount": "25.00", "currency": "USD"}`; the amount is a decimal string |
+| `transfer_method` | `LOCAL` or `SWIFT`, always set explicitly |
+| `address` | `street_address`, `city`, `postcode`, `country_code`; a US address also needs `state` as an ISO code such as `US-TX` |
+| `bank` | the fields of the corridor, below |
+
+Only these corridors (country, currency, method) are accepted:
+
+| Corridor | `bank` fields |
+|---|---|
+| US, USD, LOCAL | `account_name`, `account_number`, `routing_number`, `category` (`Checking` or `Savings`, exact casing) |
+| GB, GBP, LOCAL | `account_name`, `account_number`, `sort_code`, `bank_name` |
+| DE, EUR, SWIFT | `account_name`, `iban`, `swift_code` |
+
+Unknown fields are refused. The input carries no account id, total, fee or request_id: code
+prices the payroll and resolves each employer's account from its tenants row.
 
 ## Actions and tools
 
@@ -167,6 +200,7 @@ deployed state machines, with the fake's simulated clock. Run them with `make ch
 | `test_swift_fee_and_part_paid.py` | the EUR 12.85 SWIFT fee on a 2,000 EUR payout, and the part-paid employer |
 | `test_match_fields.py` | match lists cover the spine's match fields; a foreign object is never adopted |
 | `test_model_pricing.py`, `test_properties.py` | input parsing and pricing; hypothesis tests for isolation and exact reconciliation |
+| `test_live_sizing.py` | the live test sizes employer b from its balance, within a 1,000 USD cap, and can run again; the accounts file format; the sample payroll |
 | `test_tools.py`, `test_contract.py` | every tool through `KitToolHarness` (approval bound to the proposal hash, operator-only tenancy, no model-chosen account, amount or request_id); the kit surface |
 
 `test_synth_k6.py` (marker `synth`, `make synth-test`) synthesises the kit through `KitStack`.
@@ -174,7 +208,18 @@ deployed state machines, with the fake's simulated clock. Run them with `make ch
 The `sandbox` marker (`make sandbox-test`) covers `test_acceptance_sandbox.py`, which runs
 the acceptance scenario on the fake, and `test_live_sandbox.py`, which runs the same scenario
 and amounts on the shared Airwallex sandbox only when `AWX_K6_LIVE=1` and `AWX_K6_ACCOUNTS` names the
-owner-only connected-accounts file (`AWX_K6_RECORD` optionally names a run-record file):
+owner-only connected-accounts file (`AWX_K6_RECORD` optionally names a run-record file).
+Nothing in the repository creates the accounts file. Write it yourself, outside the repository,
+with mode 600: one line per employer, `KEY: acct_...`, and `#` starts a comment.
+
+```
+# kit 6 employer connected accounts (poc-i6-a, poc-i6-b, poc-i6-c)
+K6_EMPLOYER_A_ACCT: acct_...
+K6_EMPLOYER_B_ACCT: acct_...
+K6_EMPLOYER_C_ACCT: acct_...
+```
+
+Then run:
 
 ```
 AWX_K6_LIVE=1 AWX_K6_ACCOUNTS=<accounts file> uv run --all-packages pytest -m sandbox kits/k6_payroll/tests/test_live_sandbox.py -s
@@ -185,6 +230,16 @@ It holds `flock /tmp/awx-sandbox.lock` for the whole run, never creates a connec
 by deposit simulation, and creates beneficiaries, FX quotes, conversions, transfers and
 charges. It asserts a and c paid, b blocked and untouched, and nothing in flight. Without
 `AWX_K6_LIVE` it runs on the fake.
+
+Employer b must end 0.01 USD short of its payroll, and the test never takes money out of b, so
+b's balance only grows from run to run. While b holds less than its payroll, the test deposits
+just enough to leave b 0.01 short. Once b holds more, the test grows b's USD payout by the excess instead,
+so b is 0.01 short at the balance it already has and the test can run again on the same sandbox.
+It grows b's payroll by at most 1,000 USD; above that it stops before any deposit or payout and
+says so, because a large stray deposit into b would otherwise turn the test into a very large
+blocked payroll. The `need_b` line of the run record gives b's payroll need (`need`) and the
+balance b is sized to hold (`b_balance`).
+`test_live_sizing.py` checks this sizing offline.
 
 ## Validation
 
@@ -201,7 +256,17 @@ employer's funds before the first payout and flags a part-paid employer.
 Deployed agent, 7 Oct 2026: signed in as the kit 6 operator, the agent called a read tool
 and reported employer a's sandbox wallet balances.
 
-Not validated: a payroll run, rate lock or claim release on the deployed stack; the
+Deployed agent, 8 Oct 2026, on a deployment from a fresh clone into a new account: signed in as
+the kit 6 operator, the agent proposed a `2026-W41` payroll for employer c with one 25.00 USD
+LOCAL contractor. It needed SINGLE approval, the kit 6 approver approved, the parent and child
+executions SUCCEEDED and the agent reported the payout PAID. On the same day the live test
+stopped before any deposit or payout, because employer b already held more than its payroll
+after earlier runs. The test now sizes b from its balance (above). Later on 8 Oct it passed
+live: employer b's payroll was resized to 0.01 USD short of the balance b already held,
+nothing moved out of b and nothing was deposited into it, and employers a and c were paid while
+b was BLOCKED.
+
+Not validated: a rate lock or claim release on the deployed stack; the
 `financial_transactions` filter and paging fields; the live echo of `reason` and `reference`.
 
 ## Assumptions and limits

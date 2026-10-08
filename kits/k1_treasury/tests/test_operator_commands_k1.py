@@ -237,3 +237,86 @@ def test_a_seed_losing_the_final_put_is_refused_and_leaves_the_winner(world):
     assert winner_id
     again = seed(ctx, bens, replace=True)
     assert again["book_id"] == winner_id  # M2: one id, whoever seeded first
+
+
+# --- seed dates and the due window ------------------------------------------------------------
+
+
+def _dated_world(world, now):
+    fake, _h, ctx, bens = world
+    h = KitToolHarness.for_kit("k1", port=fake, clock=lambda: now)
+    ctx = OperatorContext(
+        kit="k1", platform_store=h.store(), store_for=h.store, now=now, read=fake.read
+    )
+    return h, ctx, bens
+
+
+def test_a_seed_without_a_start_puts_every_obligation_in_the_next_72_hours(world):
+    """8 Oct 2026: a book seeded that day listed due dates of 19 and 20 Oct, and the agent
+    called them due in the next 72 hours."""
+    now = datetime(2026, 10, 8, 14, 30, tzinfo=UTC)
+    h, ctx, bens = _dated_world(world, now)
+    report = seed(ctx, bens)
+    obs = h.call("read_obligations", {})["untrusted_data"]["obligations"]
+    assert {o["obligation_id"]: o["due_window"] for o in obs} == dict.fromkeys(
+        bens, "NEXT_72_HOURS"
+    )
+    for o in load_book(h.store()).obligations:
+        assert now < o.due_at <= now + timedelta(hours=72)
+        assert report["due"][o.obligation_id] == o.due_at.isoformat()
+    # The scenario starts at the next whole hour: the shipping invoice keeps its 09:00 offset.
+    assert load_book(h.store()).obligation("ob-shipping").due_at == datetime(
+        2026, 10, 9, 0, tzinfo=UTC
+    )
+
+
+def test_scenario_start_pins_the_dates_and_keeps_their_gaps(world):
+    from awx_k1_treasury.book import DEMO_BOOK
+
+    h, ctx, bens = _dated_world(world, datetime(2026, 10, 8, 14, 30, tzinfo=UTC))
+    seed(ctx, bens, scenario_start="2026-10-19")  # the guide's own dates
+    book = load_book(h.store())
+    for oid in bens:
+        assert book.obligation(oid).due_at == DEMO_BOOK.obligation(oid).due_at
+    assert book.forecasts[0].expected_at == DEMO_BOOK.forecasts[0].expected_at
+    seed(ctx, bens, scenario_start="2026-11-02T00:00Z", replace=True)
+    moved = load_book(h.store())
+    for oid in bens:
+        assert moved.obligation(oid).due_at - book.obligation(oid).due_at == timedelta(days=14)
+
+
+@pytest.mark.parametrize(
+    ("start", "message"),
+    [
+        ("19 Oct", "is not an ISO date"),
+        ("2026-10-19T09:00", "needs a timezone"),
+        (20261019, "must be an ISO date or date-time string"),
+    ],
+)
+def test_a_bad_scenario_start_is_refused_and_writes_nothing(world, start, message):
+    _fake, h, ctx, bens = world
+    with pytest.raises(OperatorCommandError, match=message):
+        seed(ctx, bens, scenario_start=start)
+    assert load_book(h.store()) is None
+
+
+def test_read_obligations_does_not_call_a_later_obligation_due_in_the_window(world):
+    """The book's dates are 19 to 21 Oct; read on 8 Oct, none is in the next 72 hours."""
+    from awx_k1_treasury.book import DEMO_BOOK
+
+    fake, _h, _ctx, bens = world
+    pinned = {"scenario_start": "2026-10-19"}
+    h, ctx, _ = _dated_world(world, datetime(2026, 10, 8, 14, 30, tzinfo=UTC))
+    seed(ctx, bens, **pinned)
+    view = h.call("read_obligations", {})["untrusted_data"]
+    assert view["due_window_hours"] == 72
+    assert {o["due_window"] for o in view["obligations"]} == {"LATER"}
+    noon_20 = datetime(2026, 10, 20, 12, tzinfo=UTC)
+    later = KitToolHarness.for_kit("k1", port=fake, clock=lambda: noon_20)
+    later.stores[("k1", "platform")] = h.store()
+    windows = {
+        o["obligation_id"]: o["due_window"]
+        for o in later.call("read_obligations", {})["untrusted_data"]["obligations"]
+    }
+    assert DEMO_BOOK.obligation("ob-shipping").due_at < noon_20
+    assert windows == {"ob-shipping": "OVERDUE", "ob-office-usd": "NEXT_72_HOURS"}

@@ -221,8 +221,8 @@ only if every forecast is bank-corroborated and invoice-matched, and MEDIUM othe
 (including no forecasts). The thin-reserve rule watches the funding wallet only: a bought
 currency deliberately lands on its floor, because the plan converts the minimum.
 
-In the demo book on the fake, the supplier conversion buys EUR 6,031.91 (7,525.70 plus the
-6.21 SWIFT fee, less 1,500 of headroom above the EUR floor) at the locked quote. It is AUTO
+In the demo book on the fake, the supplier conversion buys EUR 6,038.55 (7,525.70 plus the
+12.85 SWIFT fee, less 1,500 of headroom above the EUR floor) at the locked quote. It is AUTO
 with supported evidence and SINGLE once the Acme email contradicts the forecast.
 
 ## Money-safety measures
@@ -230,7 +230,7 @@ with supported evidence and SINGLE once the Acme email contradicts the forecast.
 | Risk in the guide's kit | Kit 1 handling |
 |---|---|
 | No operation or idempotency record for conversion and transfer | Request ids come from the obligation, through the lock attempt. An obligation lock in the store blocks a second proposal. Each leg is reconciled by request_id before any send, a submission record pins the exact body under each request_id, and the spine's operation store is the long-term guard. |
-| A flat SWIFT fee left out of the plan | `PlanConfig.swift_fees`, default `SANDBOX_SWIFT_FEES` = EUR 6.21, what the sandbox charged (`FAKE-FIDELITY.md` `[tr-swift-100]`). The guide says EUR 12.85, kept as `GUIDE_SWIFT_FEES` for reference. `min_conversion` buys the need (amount plus fee) minus headroom, so the EUR wallet lands on its floor. |
+| A flat SWIFT fee left out of the plan | `PlanConfig.swift_fees`, default `SWIFT_FEES`: the largest fee in `RECORDED_SWIFT_FEES`, EUR 12.85 from the guide (the sandbox charged 6.21, and 6.22 on some transfers on 8 Oct 2026, a 7,525.70 EUR payout among them). `min_conversion` buys the need (amount plus fee) minus headroom, so the plan lands the EUR wallet on its floor and a smaller charged fee leaves it above. |
 | A quote booked more than once | The sandbox returns `usage: MULTI_USE` and books a quote again, so `locks.burn_quote` lets one quote book at most one conversion request_id, across processes, and policy blocks a used rate lock. |
 | Reserve checked per leg, not for the whole plan | `whole_plan_breaches` checks every touched wallet after every leg in execution order, fees included. It runs at policy, before conversions at quoted amounts, and before transfers. |
 
@@ -331,7 +331,7 @@ the stand-alone wrapper `kits/k1_treasury/scripts/seed_deployed_book.py`.
 
 | Command | Once | Args |
 |---|---|---|
-| `seed_treasury_book` | yes | `{"beneficiaries": {"<obligation_id>": "<beneficiary id>", ...}, "book_version": "<slug>", "replace": false}` |
+| `seed_treasury_book` | yes | `{"beneficiaries": {"<obligation_id>": "<beneficiary id>", ...}, "book_version": "<slug>", "replace": false, "scenario_start": "<YYYY-MM-DD>"}` |
 
 - It writes the book into the platform-tenant store, mints the random book id (M2) and keeps
   only the mapped obligations, from the demo template (`ob-shipping`, `ob-supplier-eur`,
@@ -339,7 +339,20 @@ the stand-alone wrapper `kits/k1_treasury/scripts/seed_deployed_book.py`.
 - Every beneficiary is read through `ctx.read`: it must exist and carry a `poc-i1-` nickname.
   The command refuses when `read` is None, and refuses the template's `ben-poc-k1-*`
   placeholders. Any read failure is a refusal and writes nothing.
-- A second run is refused unless `replace` is true; a replace keeps the book id.
+- It moves every due date and expected receipt by one offset (`book.moved_to`) so the
+  scenario starts at `scenario_start`: an ISO 8601 (International Organization for
+  Standardization) date read as midnight Coordinated Universal Time (UTC), or an ISO 8601
+  date-time with a timezone. Without it the scenario starts at the seed time rounded up to the
+  next whole hour, so every seeded obligation falls due within the 72 hours `read_obligations`
+  reports on. The gaps between the dates stay as the template has them. The report's `due`
+  lists each seeded due date. `read_obligations` marks each obligation's `due_window` against
+  its own clock (`as_of`): OVERDUE, NEXT_72_HOURS or LATER.
+- A second run is refused unless `replace` is true; a replace keeps the book id and moves the
+  dates only. Obligation locks are keyed `obligation/<id>` whatever the book version, and PAID
+  is final, so a paid obligation stays PAID after a replace and a new plan for it is BLOCKED:
+  `execute_plan` pays each obligation id once per deployment. To pay again, map an obligation
+  that has not been paid, as `kits/k1_treasury/examples/reseed_treasury_book.yaml` does with
+  `ob-office-usd`.
 - The report lists `open_locks` (every `obligation/` lock in the store that is not PAID or
   RELEASED, whichever book it came from) and `dropped_with_open_lock` (any of those this
   replace took out of the book).
@@ -357,7 +370,8 @@ client and never printed):
 ```
 uv run --all-packages python kits/k1_treasury/scripts/seed_deployed_book.py \
     --ledger-table <AwxSpine ledger table> \
-    --map ob-supplier-eur=<beneficiary id> --book-version demo-1 [--replace]
+    --map ob-supplier-eur=<beneficiary id> --book-version demo-1 [--replace] \
+    [--scenario-start <YYYY-MM-DD>]
 ```
 
 ## Guide ambiguities and the reading taken
@@ -365,9 +379,13 @@ uv run --all-packages python kits/k1_treasury/scripts/seed_deployed_book.py \
 - Reserve floor: per wallet and inclusive. A wallet may end exactly on its floor. A wallet the
   plan does not touch is not judged. A wallet already below its floor is not topped up: the
   obligation escalates.
-- SWIFT fees: only EUR has sandbox evidence: 6.21 on 1.00 and 100.00 EUR. Kit 6's live run
-  found 6.21 too low for a 2,000 EUR payout, so the reserve check might undersize a large SWIFT
-  payout. SWIFT in any other currency escalates.
+- SWIFT fees: sized at the largest fee on record, the rule kit 6 uses. For EUR that is the
+  guide's flat 12.85. The sandbox charged 6.21 on 1.00 and 100.00 EUR, and 6.22 on some 10.00
+  EUR payouts on 8 Oct 2026, when a plan sized at 6.21 left the wallet 0.01 EUR under its floor.
+  Kit 6's live run found 6.21 too low for a 2,000 EUR payout, and on 8 Oct 2026 a deployed
+  7,525.70 EUR SWIFT payout was charged 6.22 EUR. A wallet the plan lands on its
+  floor therefore ends up to 6.64 EUR above it on the sandbox. SWIFT in any other currency
+  escalates.
 - Rate direction: sandbox-verified. `currency_pair` is fixed per pair, and `rate` is units of
   the second currency per one of the first. When the pair is BUY+SELL, sell = buy x rate. When
   it is SELL+BUY, sell = buy / rate. Anything else is refused. The plan ceiling is the

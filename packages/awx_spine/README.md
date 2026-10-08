@@ -92,7 +92,10 @@ It reads credentials through `EnvFileCredentials` and expects long-lived fixture
 account: two ACTIVE connected accounts, a platform beneficiary, a cardholder and a card, named by
 `AWX_CONTRACT_ACCT_A`, `AWX_CONTRACT_ACCT_B`, `AWX_CONTRACT_BENEFICIARY`,
 `AWX_CONTRACT_CARDHOLDER` and `AWX_CONTRACT_CARD`. Set those to your own sandbox account's
-fixture ids; the module skips, naming the missing variables, until all five are set. Every
+fixture ids ("Contract fixtures" in [docs/testing.md](../../docs/testing.md) says what each
+object is and how to find its id). The module skips, naming the missing variables, until every
+one of them is set, and a sandbox run that skipped it ends with a `CONTRACT SUITE SKIPPED`
+line. Every
 object a run creates carries a `poc-ct` label (`poc-ct-<hex>` in references and nicknames,
 plain `poc-ct` in the merchant, card and file names), so its objects can be found in the
 sandbox by that label. A run issues no card and leaves nothing reserved.

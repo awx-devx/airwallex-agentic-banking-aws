@@ -36,15 +36,30 @@ make synth-test
 ```
 
 `make check` and `make synth-test` must pass on the commit you deploy (see "Synth and deploy"
-in [infra/README.md](../infra/README.md)). Then bootstrap the account and Region once, and
-deploy every stack:
+in [infra/README.md](../infra/README.md)). Each takes about 4 to 5 minutes, and pytest prints
+only dots while it runs. Then bootstrap the account and Region once, and deploy every stack:
 
 ```
-cd infra
-AWS_PROFILE=awx-deploy npx -y aws-cdk@2.1144.0 bootstrap aws://<12-digit id>/ap-southeast-2
-cd ..
+AWS_PROFILE=awx-deploy make bootstrap ACCOUNT=<12-digit id>
 AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>
 ```
+
+`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/ap-southeast-2` from the repository
+root. It needs no alert address: the root has no `cdk.json`, so the CDK CLI does not load the
+app. Bootstrapping from `infra/` loads the app, which then fails for want of an alert address.
+
+`cdk deploy` asks a person at a terminal to approve each stack's AWS Identity and Access
+Management (IAM) changes. A shell with no terminal (a continuous integration (CI) job, a
+coding agent) cannot answer, and the deploy stops before it creates anything. There, review the IAM changes first if you need to
+(`cdk diff` from `infra/`, with the same `-c account=... -c alert_email=...` context), then
+pass the CDK CLI's approval flag through `CDK_ARGS`:
+
+```
+AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> \
+    CDK_ARGS="--require-approval never"
+```
+
+A full deploy of every stack took about 17 minutes on 8 Oct 2026.
 
 `make deploy` runs `cdk deploy --all --outputs-file cdk-outputs.json` from `infra/`, so the
 stack outputs land in `infra/cdk-outputs.json`. The later steps read it. The alert address
@@ -71,6 +86,33 @@ aws --profile awx-deploy --region ap-southeast-2 secretsmanager put-secret-value
 rm /tmp/awx-secret.json; unset AWX_CLIENT_ID AWX_API_KEY
 ```
 
+The `read -rsp` prompts need a terminal. In a shell with no terminal, read the same values
+from an owner-only env file instead: the `KEY=VALUE` file with `AWX_CLIENT_ID` and
+`AWX_API_KEY` that the sandbox tests read, `~/.config/airwallex-sandbox/credentials.env` by
+default. Keep that file outside the repository and readable by you only (`chmod 600`). This
+keeps the values off every command line and out of shell history:
+
+```
+SECRET_ARN=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["AirwallexSecretArn"])')
+( umask 077
+  uv run --all-packages python -c 'import json; from awx_spine import EnvFileCredentials; c = EnvFileCredentials().get(); print(json.dumps({"client_id": c.client_id, "api_key": c.api_key}))' \
+      > /tmp/awx-secret.json )
+aws --profile awx-deploy --region ap-southeast-2 secretsmanager put-secret-value \
+    --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
+rm /tmp/awx-secret.json
+```
+
+To read another file, pass its path: `EnvFileCredentials(Path("<file>"))`, with
+`from pathlib import Path`. The secret's Amazon Resource Name (ARN) reaches
+`infra/cdk-outputs.json` only once the whole deploy has finished. To seed the secret while
+the later stacks still deploy, read it from the spine stack's outputs instead:
+
+```
+SECRET_ARN=$(aws --profile awx-deploy --region ap-southeast-2 cloudformation describe-stacks \
+    --stack-name AwxSpine --query "Stacks[0].Outputs[?OutputKey=='AirwallexSecretArn'].OutputValue" \
+    --output text)
+```
+
 Of the deployed roles, only the per-kit readers and the mutation adapter can read this secret.
 An operator with IAM access to it can read it too: `awx-deploy` reads it with your operator
 credentials for the platform-scope checks its commands make (beneficiaries, connected
@@ -91,20 +133,45 @@ tenant. For kits 5 to 8, the tenant is a tenants-table row (next section). Actio
 declares `ApproverScope.KIT_OPERATOR` (an advance, a bridge, a seller payout) are approved by
 the kit's `<kit>:operator` tenant instead of the customer's own.
 
+These are the users the kit walkthroughs and the deployed checks use:
+
 | Username | `custom:tenant_id` | Group | Used by |
 |---|---|---|---|
 | `demo-platform-requester` | `platform` | requester | kits 1 to 4, deployed checks |
 | `demo-platform-approver` | `platform` | approver | kits 1 to 4 |
+| `demo-k5-alpha-requester` | `t-alpha` | requester | kit 5 customer Alpha: a shortfall and a bridge request |
+| `demo-k5-alpha-approver` | `t-alpha` | approver | kit 5 customer Alpha's own-tenant approvals |
+| `demo-k5-bravo-requester` | `t-bravo` | requester | kit 5 customer Bravo: a second bridge demo once Alpha's obligation is bridged |
+| `demo-k5-operator-approver` | `k5:operator` | approver | kit 5 bridge approvals, deployed checks |
 | `demo-k6-operator` | `k6:operator` | requester | kit 6, deployed checks |
 | `demo-k6-approver` | `k6:operator` | approver | kit 6 |
-| `demo-<kit>-<name>-requester` | a kit 5, 7 or 8 customer tenant, for example `cara` or `k7:borrower:loan-a` | requester | that customer |
-| `demo-<kit>-<name>-approver` | the same tenant | approver | that customer's own-tenant approvals |
-| `demo-<kit>-operator-approver` | `k5:operator`, `k7:operator` or `k8:operator` | approver | that kit's operator approvals |
+| `demo-k7-loan-a-requester` | `k7:borrower:loan-a` | requester | kit 7 borrower of `loan-a`: an advance |
+| `demo-k7-loan-a-approver` | `k7:borrower:loan-a` | approver | kit 7 borrower's own-tenant approvals |
+| `demo-k7-loan-c-requester` | `k7:borrower:loan-c` | requester | kit 7 borrower of `loan-c`: a second advance |
+| `demo-k7-loan-c-approver` | `k7:borrower:loan-c` | approver | kit 7 second borrower's own-tenant approvals |
+| `demo-k7-operator-approver` | `k7:operator` | approver | kit 7 advance approvals |
+| `demo-k8-cara-requester` | `cara` | requester | kit 8 seller Cara |
+| `demo-k8-cara-approver` | `cara` | approver | kit 8 seller Cara's own-tenant approvals |
+| `demo-k8-operator-approver` | `k8:operator` | approver | kit 8 seller payout approvals |
 
-`<name>` is a short label for the tenant, for example `demo-k8-cara-requester` for tenant
-`cara` and `demo-k7-loan-a-requester` for tenant `k7:borrower:loan-a`. Usernames become
-Secrets Manager names, which cannot contain `:`, so never copy a tenant id with colons into a
-username. The real tenant id goes in `custom:tenant_id`.
+The tenant ids match the deploy files: `t-alpha` is a kit 5 customer in `deploy/k5.yaml`,
+`cara` a kit 8 seller in `deploy/k8.yaml`, and `k7:borrower:loan-a` is the value to pass as
+`K7_TENANT_LOAN_A` to `deploy/k7.yaml`, and `k7:borrower:loan-c` the value for
+`K7_TENANT_LOAN_C`. The second loan is there for a second advance demo: the first advance can
+use all of `loan-a`'s commitment, and kit 7 blocks a disbursement once the commitment is used. Kit 7's borrower tenant ids are your choice: pick
+another and the user's `custom:tenant_id` must name the same value. To demo another customer,
+follow the same pattern: `demo-<kit>-<name>-requester` and `demo-<kit>-<name>-approver`, where
+`<name>` is a short label for the tenant.
+
+Usernames become Secrets Manager names, which cannot contain `:`, so never copy a tenant id
+with colons into a username. The real tenant id goes in `custom:tenant_id`.
+
+Every customer tenant (`t-alpha`, `k7:borrower:loan-a`, `cara`) needs a tenants-table row,
+which its kit's deploy file writes. The `platform` tenant and an operator tenant that only
+approves (`k5:operator`, `k8:operator`) need none: the approval API reads the caller's
+`tenant_id` claim. `k6:operator` and `k7:operator` also start runs that resolve their tenant
+through the table (kit 6 payroll, kit 7 reconciliation), so `deploy/k6.yaml` and
+`deploy/k7.yaml` write a row for each.
 
 Each password goes into Secrets Manager as `awx-poc/demo-users/<username>`, a JSON object
 `{"username": ..., "password": ...}`. `scripts/deployed_security_checks.py` signs in from these
@@ -140,8 +207,17 @@ EOF
 
 create_demo_user demo-platform-requester platform requester
 create_demo_user demo-platform-approver platform approver
+create_demo_user demo-k5-alpha-requester t-alpha requester
+create_demo_user demo-k5-alpha-approver t-alpha approver
+create_demo_user demo-k5-bravo-requester t-bravo requester
+create_demo_user demo-k5-operator-approver k5:operator approver
 create_demo_user demo-k6-operator k6:operator requester
 create_demo_user demo-k6-approver k6:operator approver
+create_demo_user demo-k7-loan-a-requester k7:borrower:loan-a requester
+create_demo_user demo-k7-loan-a-approver k7:borrower:loan-a approver
+create_demo_user demo-k7-loan-c-requester k7:borrower:loan-c requester
+create_demo_user demo-k7-loan-c-approver k7:borrower:loan-c approver
+create_demo_user demo-k7-operator-approver k7:operator approver
 create_demo_user demo-k8-cara-requester cara requester
 create_demo_user demo-k8-cara-approver cara approver
 create_demo_user demo-k8-operator-approver k8:operator approver
@@ -171,10 +247,15 @@ Run it as `uv run --all-packages awx-deploy ...`. `--tenants-table`, `--ledger-t
 
 `deploy/k1.yaml`, `k5.yaml`, `k6.yaml`, `k7.yaml` and `k8.yaml` hold each kit's tenants rows
 and its ordered operator commands, taken from the "Setting up a deployed kit" section of the
-kit's README. Kits 2, 3 and 4 have no deploy file: they load no state (kit 3's README describes
-how an operator stages the first payment of its demo). Real ids are `${NAME}` variables, listed
+kit's README. Kits 2, 3 and 4 have no deploy file: they load no state (an operator stages the
+first payment of kit 3's demo with `kits/k3_incident/scripts/stage_original_transfer.py`, which
+kit 3's README describes). Real ids are `${NAME}` variables, listed
 at the top of each file (for example the `acct_...` id of each connected account). Pass them
 with `--var NAME=value` or a `--vars` file (YAML or JSON, a mapping of `NAME: value`).
+
+Some seeded demos depend on the day you load them. Kit 1's seed starts its demo book at the
+seed time, so its obligations fall due within the next 72 hours. Kit 5's bridge demo needs
+`K5_DUE_ON` to be the day you run it. Each kit's README says how to re-seed for a later day.
 
 ```
 uv run --all-packages awx-deploy plan deploy/k8.yaml --vars k8-vars.yaml
@@ -232,7 +313,7 @@ code and `packages/awx_spine/FAKE-FIDELITY.md` record:
 | Beneficiary | `POST /api/v1/beneficiaries/create` with a `nickname` (`LIVE_BENEFICIARY` in `kits/k1_treasury/tests/test_acceptance.py` is a complete EUR SWIFT body). A replayed `request_id` creates a second beneficiary, so look for an existing one first (`GET /api/v1/beneficiaries`, matched client-side: `?nickname=` does not filter). The kit 1 live acceptance test (`AWX_LIVE=1`) finds or creates `poc-i1-supplier-de`, and the kit 3 live test (`AWX_K3_LIVE=1`) finds or creates `poc-i3-supplier`. |
 | Connected account | `POST /api/v1/accounts/create` with `account_details` and the label as `nickname` (status `CREATED`), then `POST /api/v1/accounts/{id}/submit` with an empty body (`SUBMITTED`), then the sandbox simulation `POST /api/v1/simulation/accounts/{id}/update_status` with `{"next_status": "ACTIVE", "force": true}`. Foreign exchange (FX) on a new account is refused for a few minutes after it turns ACTIVE. |
 | Global Account | `GET /api/v1/global_accounts` with `x-on-behalf-of: <acct>` lists a connected account's Global Accounts (the kit 6 live test does this; in its recorded run every employer already had a USD one). Listing the platform's own without the header, and `POST /api/v1/global_accounts/create` (with `request_id`, `country_code` and `required_features`, for example `[{"currency": "USD", "transfer_method": "LOCAL"}]`), have not run from this repository, so check the result in the sandbox web app. The platform needs a Global Account in each currency it is funded in, and may have none in USD. |
-| Deposit | `POST /api/v1/simulation/deposit/create` with `{global_account_id, amount, payer_name}`, into a Global Account of the wallet being funded, with `x-on-behalf-of: <acct>` when that wallet is a connected account's. The balance posts at once. Kit 7's `fund_capital` accepts either the `id` or the `source_id` of the deposit's `DEPOSIT` row in `GET /api/v1/financial_transactions` (that row shape is assumed, not recorded from a live read; see `packages/awx_spine/FAKE-FIDELITY.md`). |
+| Deposit | `POST /api/v1/simulation/deposit/create` with `{global_account_id, amount, payer_name}`, into a Global Account of the wallet being funded, with `x-on-behalf-of: <acct>` when that wallet is a connected account's. The deposit first shows `PENDING` and settles shortly after (about a minute on 8 Oct 2026), so wait for its `DEPOSIT` row in `GET /api/v1/financial_transactions` to settle before a step that needs the money. Kit 7's `fund_capital` accepts either the `id` or the `source_id` of the deposit's `DEPOSIT` row in `GET /api/v1/financial_transactions` (that row shape is assumed, not recorded from a live read; see `packages/awx_spine/FAKE-FIDELITY.md`). |
 
 Every call needs a bearer token from `POST /api/v1/authentication/login`. In Python,
 `awx_spine.AirwallexClient(awx_spine.EnvFileCredentials())` logs in itself from
@@ -297,12 +378,18 @@ the intent hash they reviewed, which must match the proposal. Copy `intent_hash`
 `awxpoc proposals show <proposal_id>` after reviewing the intent. `proposals list` shows a
 caller only the proposals its tenant may see or decide.
 
+To follow a run, read the proposal's status with `awxpoc proposals show <proposal_id>`. That
+status is the source of truth for the run's outcome. The Step Functions execution (named
+after the proposal id) records a failed run in its audit state and then ends, so the execution
+can show `SUCCEEDED` while the proposal's status is `FAILED`. Its execution history and
+output still help to see which step failed.
+
 ## Check the deployment
 
 `scripts/deployed_security_checks.py` runs read-only checks against the deployed stacks. No
 money-moving tool is called. It needs the full deploy (all eight kit stacks), the
-`demo-platform-requester` and `demo-k6-operator` users and their `awx-poc/demo-users/*`
-secrets, and the outputs file. It uses the Region `ap-southeast-2`.
+`demo-platform-requester`, `demo-k6-operator` and `demo-k5-operator-approver` users and their
+`awx-poc/demo-users/*` secrets, and the outputs file. It uses the Region `ap-southeast-2`.
 
 ```
 AWS_PROFILE=awx-deploy uv run --all-packages python scripts/deployed_security_checks.py
@@ -314,15 +401,16 @@ any check fails.
 
 | Check | What it proves |
 |---|---|
-| 0 | An authenticated `tools/list` on the Gateway answers and lists kit-prefixed tools (`k1___...`). |
+| 0 | An authenticated `tools/list` on the Gateway answers and lists kit-prefixed tools (`k1___...`). It follows `nextCursor` through every page and reports the total, and fails when the paging stops on its page cap or a repeated cursor. |
 | 1 | An unauthenticated `tools/list` is refused (HTTP 401 or 403). |
 | 2 | A token with a forged signature is refused (by the Gateway authorizer or the identity interceptor). |
 | 2b | The kit 1 tool Lambda logged no invocation during the forged call, so the refusal happened before any tool ran. |
-| 3 | A valid caller's identity reaches the tool Lambda: the identity interceptor passes `_awx_caller` through. |
+| 3 | A valid caller's identity reaches the tool Lambda: the identity interceptor passes `_awx_caller` through. It passes only on a read result or `READ_FAILED`, which the tool returns after verifying the caller. |
 | 3b | Invoking the tool Lambda directly with a forged `_awx_caller` is refused (`NOT_AUTHORISED`). |
 | 4 | The kit 1 tool Lambda refuses another kit's tool name, even with a valid token. |
-| 5 | A `k6:operator` caller cannot read kit 1 (platform) data. |
+| 5 | A `k6:operator` caller cannot read kit 1 (platform) data. Only the tool plane's own refusal passes: `TENANT_SCOPE` with a message that says the kit serves platform callers only. A refusal from the reader or later fails, so the result does not depend on whether kit 1 is seeded. |
 | 5b | The approval API lists no other tenant's proposals to the `k6:operator` caller. |
+| 5c | A `k5:operator` caller, whose tenant has no tenants-table row, cannot read kit 1 (platform) data. As for check 5, only the tool plane's own `TENANT_SCOPE` refusal (the kit serves platform callers only) passes. |
 | 6 | The kit 1 reader refuses a payload that names kit 2: the reader's kit comes from its own configuration. |
 | 7 | No kit-step role can read the Airwallex secret (IAM policy simulation over every step role). |
 

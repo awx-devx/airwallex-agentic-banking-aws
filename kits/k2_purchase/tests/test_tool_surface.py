@@ -104,11 +104,16 @@ def _origin(p):
 
 def test_a_callers_tenant_claim_never_reaches_a_connected_account(world):
     env, h, card_id, _ = world
+    # Kit 2 serves platform callers only: any other claim, with a row or none, is refused.
+    for claim in ("tenant-a", "k5:operator"):
+        for tool in ("propose_freeze_card", "read_card_controls"):
+            refused = h.call(tool, {"card_id": card_id}, tenant_id=claim)
+            assert refused["error"]["code"] == "TENANT_SCOPE", (claim, tool, refused)
+    assert h.executions == []
     plain = h.call("propose_freeze_card", {"card_id": card_id})
-    claimed = h.call("propose_freeze_card", {"card_id": card_id}, tenant_id="tenant-a")
-    read = h.call("read_card_controls", {"card_id": card_id}, tenant_id="tenant-a")
+    read = h.call("read_card_controls", {"card_id": card_id})
     assert "untrusted_data" in read
-    assert claimed["proposal_id"] == plain["proposal_id"]  # the same platform proposal
+    assert "proposal_id" in plain
     assert {c["payload"]["tenant_id"] for c in h.reader.calls} == {"platform"}
     assert {e["tenant_id"] for e in h.executions} <= {None, "platform"}
     assert {obo for _, _, obo in env.fake.requests} == {None}
@@ -176,3 +181,41 @@ def test_every_propose_tool_maps_to_one_state_machine(world):
     assert sorted(h.dispatcher.specs) == sorted(SPECS)
     raw = transport.dumps({"ok": True})
     assert transport.loads(raw) == {"ok": True}
+
+
+def test_read_card_controls_finds_an_issued_card_by_its_purchase_ref(world):
+    """After an approved issue_card the agent has only the purchase_ref it proposed; the read
+    returns that card's id (cold run, 8 Oct 2026: the id was only in the execution output)."""
+    env, h, card_id, test_card = world
+    book = env.kit_store.get("book")
+    h.store().put("book", dict(book.value), expected_version=None)  # the deployed kit store
+    out = h.call("read_card_controls", {"purchase_ref": "crm-seats"})
+    assert "error" not in out, out
+    assert out["untrusted_data"]["card_id"] == card_id
+    assert out["untrusted_data"]["purchase_ref"] == "crm-seats"
+    assert out["untrusted_data"]["controls"]["currency"] == "USD"
+    tested = h.call("read_card_controls", {"purchase_ref": "limit-test-crm"})
+    assert tested["untrusted_data"]["card_id"] == test_card
+    missing = h.call("read_card_controls", {"purchase_ref": "never-issued"})
+    assert missing["untrusted_data"]["card_id"] is None
+    for bad in ({}, {"card_id": card_id, "purchase_ref": "crm-seats"}):
+        answer = h.call("read_card_controls", bad)["untrusted_data"]
+        assert answer == {"card_id": None, "detail": "give exactly one of card_id or purchase_ref"}
+    assert h.sfn.calls == []
+
+
+def test_tool_descriptions_say_what_the_terms_hash_is_and_how_to_get_a_test_card():
+    """Cold run, 8 Oct 2026: the agent refused to propose until it got a terms hash nobody had
+    described, and nothing said how to get a limit-test card."""
+    from awx_agent.schema import tool_definition
+
+    by_name = {t.name: t for t in TOOLS}
+    issue = tool_definition(by_name["propose_issue_card"])
+    sha = issue["inputSchema"]["properties"]["terms_document_sha256"]["description"]
+    assert "SHA-256 of the exact vendor terms document" in sha
+    assert "ask the person" in sha
+    assert "'limit-test-'" in issue["description"]
+    assert "'limit-test-'" in by_name["propose_run_limit_test"].description
+    read = tool_definition(by_name["read_card_controls"])
+    assert set(read["inputSchema"]["properties"]) >= {"card_id", "purchase_ref"}
+    assert "required" not in read["inputSchema"]

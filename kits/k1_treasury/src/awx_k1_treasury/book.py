@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
 from typing import Any
@@ -233,6 +233,28 @@ def seed_book(store: KitStore, book: TreasuryBook, *, expected_version: Any = _C
     store.put(BOOK_KEY, book_to_dict(book), expected_version=expected_version)
 
 
+def scenario_start(book: TreasuryBook) -> datetime:
+    """Midnight UTC of the day the book's earliest due date or expected receipt falls on."""
+    times = [o.due_at for o in book.obligations] + [f.expected_at for f in book.forecasts]
+    if not times:
+        raise ValueError("the book has no dates to move")
+    first = min(times).astimezone(UTC)
+    return first.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def moved_to(book: TreasuryBook, start: datetime) -> TreasuryBook:
+    """The same book with every due date and expected receipt moved by one offset, so that
+    its scenario starts at `start`. The gaps between the dates are kept."""
+    if start.tzinfo is None:
+        raise ValueError("start must be timezone-aware")
+    offset = start - scenario_start(book)
+    return replace(
+        book,
+        obligations=tuple(replace(o, due_at=o.due_at + offset) for o in book.obligations),
+        forecasts=tuple(replace(f, expected_at=f.expected_at + offset) for f in book.forecasts),
+    )
+
+
 def _at(day: int, hour: int) -> datetime:
     return datetime(2026, 10, day, hour, tzinfo=UTC)
 
@@ -243,7 +265,8 @@ def _m(amount: str, currency: str) -> Money:
 
 # The guide's scenario: five obligations across three currencies over 72 hours. Beneficiary IDs
 # are placeholders: `seed_treasury_book` refuses them and maps each kept obligation to a real
-# `poc-i1-` sandbox beneficiary.
+# `poc-i1-` sandbox beneficiary. The dates are fixed for the offline tests; the seed moves them
+# to start at the seed time (`moved_to`).
 DEMO_BOOK = TreasuryBook(
     book_version="demo-2026-10-06",
     funding_currency="USD",

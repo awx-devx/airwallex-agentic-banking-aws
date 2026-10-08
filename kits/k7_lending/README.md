@@ -19,10 +19,21 @@ The diagram source is `docs/architecture/k7_lending.drawio`.
    with the kit's operator commands (`awx-deploy apply deploy/k7.yaml`). Loans never come
    from the model.
 2. A borrower asks the agent for an advance. The agent calls `propose_disburse_advance` with
-   only a `loan_id`; the borrower's tenant and connected account are resolved server-side.
+   only a `loan_id`; the borrower's tenant and connected account are resolved server-side. If
+   the borrower does not name the loan, the agent reads it first: `read_borrower_position`
+   without a `loan_id` returns the caller's own loan id (`your_loan_ids`, each borrower tenant
+   has one loan) and its position, and never another borrower's. The borrower cannot choose
+   the amount: a borrower who asks for 2,000 USD gets the tranche that
+   code sizes, and the tool's description and result say so.
 3. Policy code sizes the next tranche from `min(ledger cash, live platform balance)` minus
    tranches in flight: the full remaining commitment, a partial tranche rounded down to the
    increment, or a delay. It hashes the amount into the proposal and starts `awx-k7-disburse_advance`.
+   A loan can be advanced up to its `commitment` in total, never more. The remaining
+   commitment is the commitment less every tranche disbursed, and repayments do not restore
+   it, so once a loan's commitment is fully disbursed every further advance is BLOCKED
+   ("commitment fully disbursed"). In `deploy/k7.yaml` each loan has an 8,000 USD commitment:
+   one full advance uses all of it, so a second advance demo needs the other loan, loan-c, and
+   a requester in its tenant.
 4. An approver in the `k7:operator` tenant approves the proposal (SINGLE, or DUAL above the
    dual-approval threshold). The build re-checks the plan, holds the tranche in the book and
    sends a `connected_account_transfers/create` from the platform to the borrower.
@@ -135,10 +146,22 @@ Follow [docs/deployment.md](../../docs/deployment.md), then for kit 7:
    and note the deposit id.
 3. Run `uv run --all-packages awx-deploy --profile <profile> apply deploy/k7.yaml`, passing
    each variable with `--var`: `K7_TENANT_LOAN_A`, `K7_TENANT_LOAN_C`, `K7_ACCT_LOAN_A`,
-   `K7_ACCT_LOAN_C`, `K7_FIRST_PERIOD` (`DEMO300S-<n>`: period n starts at 2026-01-01T00:00Z +
-   n x 300 s; see [DESIGN.md](DESIGN.md#demo-collection-periods)) and `K7_DEPOSIT_ID`. It
-   writes the tenants rows (`k7:operator` and one per borrower) and runs `open_portfolio`,
-   `add_loan` twice and `fund_capital`.
+   `K7_ACCT_LOAN_C`, `K7_FIRST_PERIOD` and `K7_DEPOSIT_ID`. It writes the tenants rows
+   (`k7:operator` and one per borrower) and runs `open_portfolio`, `add_loan` twice and
+   `fund_capital`.
+
+   `K7_FIRST_PERIOD` is `DEMO300S-<n>`, where period n starts at 2026-01-01T00:00Z + n x 300 s
+   ([DESIGN.md](DESIGN.md#demo-collection-periods)). Use the period running now. It is the
+   earliest period a collection may cover; the first collection is for the first period that
+   starts once the advance has settled, so an earlier n changes nothing and a later n only delays
+   the first collection. This prints the current period:
+
+   ```
+   python3 -c "import time; print(f'DEMO300S-{(int(time.time()) - 1767225600) // 300}')"
+   ```
+
+   `1767225600` is 2026-01-01T00:00Z in Unix seconds. After the advance, `read_borrower_position`
+   shows the next period to collect (`next_collectible_week`).
 4. Create demo users: a requester and an approver in each borrower tenant, and an approver in
    `k7:operator` for advances.
 5. Start collections and reconciliations with `awx-deploy trigger` (see
@@ -154,7 +177,7 @@ uv run --all-packages pytest kits/k7_lending/tests -m "not sandbox and not synth
 |---|---|
 | `test_money_rules.py` | the formula, rounding, tranche sizing, ledger postings and book rules, with property tests |
 | `test_scenarios.py` | every action through `local_runner.run_kit_workflow` against `FakeAirwallex`: the required acceptance test, platform binding, reconciliation scope, collection order, revenue, approvals, every runner fault and rules M1 to M4 |
-| `test_tool_surface.py` | the tools through the real dispatcher (`KitToolHarness`): approval bound to the proposal hash, tenant isolation, no model-chosen amount, account or request_id, no platform figure for a borrower |
+| `test_tool_surface.py` | the tools through the real dispatcher (`KitToolHarness`): approval bound to the proposal hash, tenant isolation, a borrower finding only its own loan id, no model-chosen amount, account or request_id, no platform figure for a borrower |
 | `test_operator_commands_k7.py` | seeding through the operator commands only, then the tools and the disbursement end to end; command refusals write nothing |
 | `test_contract.py` | every propose tool has a spec and every read tool a read; read allowlists |
 | `test_synth_k7.py` (marker `synth`) | one machine per action, only the kit-step Lambda, and Build retries never cover kit errors |
@@ -181,6 +204,15 @@ stubs (refused-charge request_id reuse and the `balances/history` row shape) run
 - Deployed agent, 7 Oct 2026, on a deployment that routes advances to the `k7:operator`
   approver: on a partial 7,200 USD advance the borrower's approver was refused and the
   `k7:operator` approver approved it; it settled.
+- Deployed agent, 8 Oct 2026, on a deployment from a fresh clone into a new account: a
+  borrower requester asked for 2,000 USD and the agent proposed the 8,000 USD tranche, with a
+  640 USD fee, because code sizes the tranche. The `k7:operator` approver approved it and the
+  run SUCCEEDED. That advance used all of loan-a's 8,000 USD commitment. A 200 USD weekly
+  collection started with `awx-deploy trigger` ran at AUTO, and `reconcile_portfolio` ran.
+- Deployed agent, 8 Oct 2026, on the same deployment: a borrower requester for loan-c asked
+  for 2,000 USD. The kit sized a 7,200.00 USD partial tranche because the reserve floor binds,
+  and the agent reported that amount with the reason the tool returned. The proposal was not
+  approved.
 - Not validated live: borrower revenue (the live runs had none, so every collection took the
   floor), the under-paying borrower, the `balances/history` row shape, insufficient-funds,
   FAILED and SUSPENDED movements, and DUAL approval. These are covered against the fake only.

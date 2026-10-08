@@ -17,9 +17,12 @@ The diagram source is `docs/architecture/k2_purchase.drawio`.
    dates, dated cash flows).
 2. Code computes the annual price, the day-by-day cash curve against the reserve floor, the
    plan, the reconsideration date and the card control set, and returns them. Nothing changes.
-3. The model calls `propose_issue_card` with the same terms. The tool starts an
-   `awx-k2-issue_card` execution, whose policy phase re-evaluates the terms server-side,
-   records the proposal (SINGLE, or DUAL above the dual-approval threshold) and waits.
+3. The model calls `propose_issue_card` with the same terms and the SHA-256 (Secure Hash
+   Algorithm, 256-bit) hash of the terms document (see
+   [Running the demo through the agent](#running-the-demo-through-the-agent)). The tool
+   starts an `awx-k2-issue_card` execution, whose policy phase re-evaluates the terms
+   server-side, records the proposal (SINGLE, or DUAL above the dual-approval threshold) and
+   waits.
 4. A different person approves the proposal through the approval API. The approval binds to
    the proposal hash, which covers the terms, the computed control set and the tier.
 5. The execution resumes and re-runs the policy, then each step builder re-checks the cash
@@ -28,7 +31,8 @@ The diagram source is `docs/architecture/k2_purchase.drawio`.
 6. The mutation adapter creates a DELEGATE cardholder and a virtual card carrying the approved
    `authorization_controls`. Finality polls list each object until it is ready.
 7. The postcondition reads the card and its limits back and checks they equal the approved
-   control set, and that the purchase's cardholder holds exactly one card.
+   control set, and that the purchase's cardholder holds exactly one card. `read_card_controls`
+   with the same `purchase_ref` then returns the new card's id.
 8. Later changes go through `awx-k2-update_card_controls`, `awx-k2-freeze_card`,
    `awx-k2-unfreeze_card` and `awx-k2-close_card`. The required acceptance test runs through
    `awx-k2-run_limit_test` on a dedicated limit-test card.
@@ -140,6 +144,51 @@ platform USD wallet must hold at least the reserve floor (25,000) plus the at-li
 the plan is BLOCKED before anything is created. See
 [docs/deployment.md](../../docs/deployment.md).
 
+## Running the demo through the agent
+
+Sign in as `demo-platform-requester` to talk to the agent and as `demo-platform-approver` to
+approve.
+
+Terms document hash. `read_purchase_plan`, `propose_issue_card` and
+`propose_update_card_controls` require `terms_document_sha256`: the lower-case hex SHA-256 of
+the exact vendor terms document the card is issued under (the file the prices and dates were
+read from). Produce it with `sha256sum terms.pdf` (`shasum -a 256 terms.pdf` on macOS) and give
+it to the agent with the document. The hash is recorded in the intent, so the approval names
+one document. Nothing compares it with a stored document; the approver checks it. The agent
+refuses to propose until it has one.
+
+Card id. Once an `issue_card` proposal is approved and its run has succeeded, ask the agent to
+read the card controls for the same `purchase_ref`. `read_card_controls` accepts either
+`card_id` or `purchase_ref` and returns the card's id, status, controls and remaining limits.
+Every other card tool takes the `card_id` it returns. Until the card exists it answers
+`card_id: null`.
+
+Limit-test card. `propose_run_limit_test` runs only on a card issued with a `purchase_ref`
+starting `limit-test-`. Ask the agent for an `issue_card` with, for example, purchase reference
+`limit-test-demo-1` and a 2.00 USD monthly price, approve it, read its card id by that
+`purchase_ref`, then ask for the limit test on that card and approve it (it debits the
+at-limit amount).
+
+A probe left in flight. A simulated authorisation whose outcome stays unknown (on 8 Oct 2026
+the sandbox answered the first one with a 500 server error) ends the run FAILED with
+`probe_<name> in flight on request_id ...`. Simulations ignore `request_id`, so the kit never
+resends a probe, and every later limit test on that card is BLOCKED with "a person decides
+(M1)". The record stays in the kit store and blocks nothing else. A person:
+
+1. Reads the card's transactions (`read_card_transactions`, or Issuing in the Airwallex
+   sandbox web app) and looks for the probe's authorisation, whose merchant name is
+   `poc-k2-<code>-<card id without dashes>` cut to 25 characters (codes: `cu` currency,
+   `mc` merchant category, `ol` over limit, `al` at limit, `cm` cumulative). No row means
+   nothing landed. A CLEARED row is a debit that this key cannot reverse.
+2. Closes that card through the agent (`propose_close_card`, SINGLE). The in-flight record
+   does not block closing.
+3. Issues a new limit-test card under a new `purchase_ref` (for example `limit-test-demo-2`)
+   and runs the limit test on it. Reusing the stuck card's `purchase_ref`
+   does not give a fresh card.
+
+`tests/test_scenarios.py::test_recovering_from_a_probe_left_in_flight_closes_that_card_and_uses_a_new_one`
+runs this procedure on FakeAirwallex.
+
 ## Tests
 
 Run the offline suite with `make check` (or `pytest kits/k2_purchase`).
@@ -149,8 +198,8 @@ Run the offline suite with `make check` (or `pytest kits/k2_purchase`).
 | Card controls: shapes, limit arithmetic, reductions (with hypothesis properties) | `tests/test_controls.py` |
 | Terms parsing, cash curve, plan choice, reconsideration, control sets | `tests/test_terms.py` |
 | Limit-test probe planning and judging | `tests/test_harness.py` |
-| End-to-end scenarios on the real runner (`local_runner` over `FakeAirwallex`): approvals, stale approvals, faults and reconcile, in-flight records, the limit test, freeze and unfreeze, raise and reduce, injected documents, rule 0 build idempotency | `tests/test_scenarios.py` |
-| Every tool through the real tool dispatcher (`KitToolHarness`) | `tests/test_tool_surface.py` |
+| End-to-end scenarios on the real runner (`local_runner` over `FakeAirwallex`): approvals, stale approvals, faults and reconcile, in-flight records and the recovery from a probe left in flight, the limit test, freeze and unfreeze, raise and reduce, injected documents, rule 0 build idempotency | `tests/test_scenarios.py` |
+| Every tool through the real tool dispatcher (`KitToolHarness`), including finding a card by its `purchase_ref` | `tests/test_tool_surface.py` |
 | Book id and change numbers on `DynamoDbKitStore` under moto, including races | `tests/test_dynamodb_kit_store.py` |
 | Tool and spec contract | `tests/test_kit_contract.py` |
 
@@ -181,6 +230,17 @@ runs the probes and closes the card, or freezes it if close fails.
   kit stopped without resending and blocked further tests on that card; a second card was used.
   Every probe on it gave the expected result, the only debit was one 2.00 USD charge, and both
   cards were closed.
+- A deployment from a fresh clone into a new account, 8 Oct 2026, through the deployed agent.
+  The agent proposed `issue_card` (SINGLE) and the platform approver approved it; the run
+  succeeded. On a first limit-test card the sandbox answered the first simulated
+  authorisation with a 500 server error; the run ended FAILED with that probe left in flight,
+  and later limit tests on that card were BLOCKED. A second limit-test card passed every
+  probe: currency, merchant category, over limit, at limit cleared, and cumulative. The first
+  card was left with its probe in flight (the procedure in
+  [A probe left in flight](#running-the-demo-through-the-agent) applies).
+- The same deployment after the fixes in this repository, 8 Oct 2026, through the deployed
+  agent: `read_card_controls` by purchase reference returned the limit-test card's id, with its
+  status and controls.
 - Not validated live: `update_card_controls`, `freeze_card` and `unfreeze_card` on a real
   card, a DUAL approval, and the MONTHLY limit window.
 

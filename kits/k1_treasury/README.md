@@ -144,7 +144,38 @@ uv run --all-packages awx-deploy --profile <profile> apply deploy/k1.yaml \
 ```
 
 Each beneficiary must already exist in the sandbox with a `poc-i1-` nickname. The command moves
-no money. Fund the platform wallets with a sandbox deposit separately, under
+no money.
+
+The seed moves the demo book's due dates so its scenario starts at the seed time, rounded up to
+the next whole hour: every seeded obligation falls due within the next 72 hours, the window
+`read_obligations` reports on. To pin the start, add `scenario_start: "<YYYY-MM-DD>"`, read as
+midnight Coordinated Universal Time (UTC), to the step's `args` in `deploy/k1.yaml`.
+
+`deploy/k1.yaml` maps `ob-supplier-eur` and `ob-shipping` only, so the deployed demo seeds the
+supplier and shipping obligations only. To show the full scenario this README describes (defer
+the office supplies, escalate the new contractor), create a `poc-i1-` LOCAL beneficiary for
+each other obligation, GBP for `ob-saas-gbp` and `ob-contractor-gbp` and USD for
+`ob-office-usd`, and add each one to the `beneficiaries` map in `deploy/k1.yaml`. The plan then
+needs a GBP wallet above its 500 GBP floor.
+
+A re-seed with `replace: true` moves the dates only. A paid obligation stays PAID on this
+deployment, because its `obligation/<id>` lock survives a replace, so `execute_plan` pays each
+obligation id once per deployment. To run the payment again, map an obligation that has not
+been paid. The args file
+[examples/reseed_treasury_book.yaml](examples/reseed_treasury_book.yaml) is the deploy file's
+`seed_treasury_book` args with `replace: true` and `ob-office-usd` (450.00 USD LOCAL) added.
+`K1_BEN_OFFICE_USD` may be the US LOCAL beneficiary you passed as `K1_BEN_SHIPPING`:
+
+```
+uv run --all-packages awx-deploy --profile <profile> run k1 seed_treasury_book \
+    kits/k1_treasury/examples/reseed_treasury_book.yaml \
+    --var K1_BEN_SUPPLIER_EUR=<id> --var K1_BEN_SHIPPING=<id> --var K1_BEN_OFFICE_USD=<id>
+```
+
+The report's `due` lists the new due dates. Once `ob-office-usd` is paid too, copy the file
+and map another unpaid obligation, with a new `book_version`.
+
+Fund the platform wallets with a sandbox deposit separately, under
 `flock /tmp/awx-sandbox.lock`. Create the `demo-platform-requester` and
 `demo-platform-approver` users as in
 [docs/deployment.md, Create demo users](../../docs/deployment.md#create-demo-users). See
@@ -163,7 +194,9 @@ Offline (`make check`), all through the real `local_runner` over `FakeAirwallex`
 | The release tool, its races with a sending run, and its paged cross-check | `tests/test_release.py`, `tests/test_release_races.py`, `tests/test_release_paging.py` |
 | Exports, the read allowlist, tenant scope, packaging | `tests/test_contract.py` |
 | Every tool through the real tool dispatcher with `KitToolHarness` | `tests/test_tool_surface.py` |
-| Seeding a deployed store | `tests/test_seed.py`, `tests/test_operator_commands_k1.py` |
+| Seeding a deployed store, the seeded dates and the due window | `tests/test_seed.py`, `tests/test_operator_commands_k1.py` |
+| The example re-seed file: a paid obligation stays paid, a newly mapped one pays | `tests/test_reseed.py` |
+| The live run's evidence file and failure messages | `tests/test_live_evidence.py` |
 
 `tests/test_synth_k1.py` (marker `synth`, `make synth-test`) synthesises `AwxKitK1` and
 `AwxAgentStack` and checks the kit's state machines, that no kit 1 role can read the Airwallex
@@ -174,8 +207,11 @@ against the fake by default. With `AWX_LIVE=1` it runs against the real sandbox 
 `local_runner`, holding `flock /tmp/awx-sandbox.lock` throughout. It finds or creates the
 `poc-i1-supplier-de` EUR SWIFT beneficiary, seeds a fresh one-obligation book per run (10.00 EUR,
 EUR floor at the current EUR balance) and, per run, creates one quote, one conversion and one
-transfer. With `AWX_K1_SHAPES=<path>` it writes the run's evidence there; the 6 Oct run is in
-`evidence/live-run-1.json`.
+transfer. It asserts that every wallet ends at or above its floor and that each payout is
+PAID, whichever SWIFT fee the sandbox charges. With `AWX_K1_SHAPES=<path>` it writes the run's
+evidence there, on a failed run too (`outcome: failed` and the error); the 6 Oct run is in
+`evidence/live-run-1.json`. Each failure message carries the run's full detail, postcondition
+included.
 
 ## Validation
 
@@ -194,16 +230,29 @@ transfer. With `AWX_K1_SHAPES=<path>` it writes the run's evidence there; the 6 
   agent locked a rate. The plan needed approval because the 18.34 USD conversion was over the
   LOW-confidence automatic limit. The platform approver approved it, and the run converted
   18.34 USD to 16.21 EUR and paid 10.00 EUR.
+- 8 Oct 2026, on a deployment from a fresh clone into a new account, through the agent: the
+  agent proposed `execute_plan` (AUTO) and it paid 12,000 USD and 7,525.70 EUR. The sandbox
+  charged a 6.22 EUR SWIFT fee on some transfers that day. The plans of that day sized the fee
+  at 6.21, and in 3 of 5 live acceptance runs the EUR wallet ended 0.01 EUR under its floor
+  after paying. The 7,525.70 EUR SWIFT payout was charged 6.22 EUR.
+- 8 Oct 2026, after the change to size the fee at 12.85, by the committed
+  `tests/test_acceptance.py` with `AWX_LIVE=1`: the live acceptance test passed on each of its 5 runs.
+  Each leg converted 22.85 EUR and ended 6.64 EUR above its floor. The sandbox charged 6.21 EUR
+  on every transfer that day, so a 6.22 charge did not occur against the new sizing.
+- 8 Oct 2026, same deployment, through the agent, after a re-seed that mapped an unpaid
+  obligation (`ob-office-usd`): `execute_plan` ran at AUTO and paid 450.00 USD.
 
-Not validated live: the release tool, a CANCELLED transfer and its failure block, any plan with
-more than one obligation, deferral, and GBP or USD payouts.
+Not validated live: the release tool, a CANCELLED transfer and its failure block, deferral,
+and GBP payouts.
 
 ## Assumptions and limits
 
 - Reserve floors are per wallet and inclusive; a wallet the plan does not touch is not judged.
-- The SWIFT fee is sized at EUR 6.21, which the sandbox charged on 1.00 and 100.00 EUR (the
-  guide says EUR 12.85). Kit 6's live run found 6.21 too low for a 2,000 EUR payout, so the
-  reserve check might undersize a large SWIFT payout. SWIFT in any other currency escalates.
+- Each SWIFT payout is sized at the largest fee on record (`money_rules.SWIFT_FEES`), the rule
+  kit 6 uses. For EUR that is the guide's flat EUR 12.85. The sandbox charged 6.21, and 6.22 on
+  some transfers on 8 Oct 2026, a 7,525.70 EUR payout among them. When the plan takes a wallet
+  down to its floor, the wallet ends at or above the floor whichever of these fees is charged:
+  up to 6.64 EUR above it on the sandbox. SWIFT in any other currency escalates.
 - The rate lock uses a one-hour quote (`HR_1`); an approval that waits longer goes STALE.
 - The lock is matched on the exact buy amount, so a balance change that alters the buy needs a
   re-lock.

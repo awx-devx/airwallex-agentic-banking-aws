@@ -28,14 +28,32 @@ def _payloads(lam):
 # --- reads -------------------------------------------------------------------------------------
 def test_read_invokes_the_kits_own_reader_as_platform_for_kits_1_to_4():
     d, lam, sfn = dispatcher()
-    out = d.dispatch("k1___read_balances", event({}, caller(tenant_id="tenant-a")))
+    out = d.dispatch("k1___read_balances", event({}, caller(tenant_id="platform")))
     assert out["untrusted_data"]["items"][0]["available"] == "500.00"
     (call,) = lam.calls
     assert call["FunctionName"] == READER_FN
     assert call["payload"]["kit"] == "k1"
     assert set(call["payload"]) == {"kit", "read", "tenant_id"}  # no mode: the reader derives it
-    assert call["payload"]["tenant_id"] == "platform"  # a k1-4 caller's tenant claim is ignored
+    assert call["payload"]["tenant_id"] == "platform"
     assert call["payload"]["read"]["on_behalf_of"] is None
+    assert sfn.calls == []
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "tenant-a",  # a tenant with a row (a kit 5-8 customer)
+        "k5:operator",  # a tenant with no row at all
+        None,  # no tenant claim
+    ],
+)
+@pytest.mark.parametrize("tool", ["k1___read_balances", "k1___propose_pay_supplier"])
+def test_kits_1_to_4_refuse_every_caller_but_the_platform(tool, claim):
+    """Kits 1-4 serve platform callers only, before the tool reads its arguments."""
+    d, lam, sfn = dispatcher()
+    out = d.dispatch(tool, event({"not_an_argument": 1}, caller(tenant_id=claim)))
+    assert out["error"]["code"] == "TENANT_SCOPE", out
+    assert lam.calls == []
     assert sfn.calls == []
 
 
@@ -49,8 +67,56 @@ def test_read_tenant_comes_from_claim_for_connected_account_kits():
 
 def test_connected_account_kit_without_tenant_claim_is_refused():
     d, lam, _ = dispatcher(kit="k5")
-    out = d.dispatch("read_balances", event({}))
+    out = d.dispatch("read_balances", event({}, caller(tenant_id=None)))  # no claim at all
     assert out["error"]["code"] == "NOT_AUTHORISED"
+    assert out["error"]["message"] == "kit k5 needs a tenant_id claim on the caller"
+    assert lam.calls == []
+
+
+def test_connected_account_kit_refuses_the_platform_claim():
+    d, lam, _ = dispatcher(kit="k5")
+    out = d.dispatch("read_balances", event({}, caller(tenant_id="platform")))
+    assert out["error"]["code"] == "NOT_AUTHORISED"
+    assert lam.calls == []
+
+
+@pytest.mark.parametrize("bad", ["", [], 0, {"t": "platform"}], ids=repr)
+def test_a_tenant_claim_that_is_present_but_not_a_non_empty_string_is_refused(bad):
+    """Read from `tenant_id` only: a present empty or non-string claim is refused, and a
+    `custom:tenant_id` beside it is never read in its place."""
+    d, lam, sfn = dispatcher()
+    out = d.dispatch("k1___read_balances", event({}, _with_claim(bad)))
+    assert out["error"]["code"] == "NOT_AUTHORISED", out
+    assert lam.calls == []
+    assert sfn.calls == []
+
+
+def _with_claim(value):
+    """A signed token whose tenant_id claim is exactly `value`, beside custom:tenant_id."""
+    import json
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from jwt_helpers import _KEY, KID, _seg, claims
+
+    body = {**claims(), "tenant_id": value, "custom:tenant_id": "platform"}
+    head = _seg(json.dumps({"alg": "RS256", "kid": KID}).encode())
+    payload = _seg(json.dumps(body).encode())
+    sig = _KEY.sign(f"{head}.{payload}".encode(), padding.PKCS1v15(), hashes.SHA256())
+    return f"{head}.{payload}.{_seg(sig)}"
+
+
+def test_custom_tenant_id_alone_is_not_a_tenant_claim():
+    from awx_agent.identity import CallerIdentity
+
+    who = CallerIdentity.from_claims({"sub": "s", "custom:tenant_id": "platform"})
+    assert who.tenant_id is None
+    d, lam, _ = dispatcher()
+    out = d.dispatch(
+        "k1___read_balances",
+        event({}, caller(tenant_id=None, **{"custom:tenant_id": "platform"})),
+    )
+    assert out["error"]["code"] == "TENANT_SCOPE"
     assert lam.calls == []
 
 
@@ -170,6 +236,44 @@ def test_spec_agent_min_tier_auto_keeps_auto(monkeypatch):
     out = d.dispatch("propose_pay_supplier", event(SMALL))
     assert out["risk_tier"] == "AUTO"
     assert out["status"] == "SUBMITTED_NO_APPROVAL_NEEDED"
+    # The run started without approval; the recheck may still stop it, and the result does
+    # not say that money moved.
+    assert out["status_message"] == (
+        "The run has started without approval. The workflow rechecks policy before its first "
+        "step and may still stop it. This result does not say whether money has moved."
+    )
+
+
+def test_a_retry_of_an_auto_proposal_in_progress_says_it_is_executing():
+    """The stored proposal's tier decides the message: an AUTO run never awaits approval."""
+    from dataclasses import replace
+
+    ticks = iter([NOW, NOW + timedelta(seconds=40)])
+    d, _, _ = dispatcher(clock=lambda: next(ticks), outcomes={})
+    d.specs = {
+        **d.specs,
+        "pay_supplier": replace(d.specs["pay_supplier"], agent_min_tier=RiskTier.AUTO),
+    }
+    first = d.dispatch("propose_pay_supplier", event(SMALL))
+    assert first["risk_tier"] == "AUTO"
+    retry = d.dispatch("propose_pay_supplier", event(SMALL))
+    assert retry["proposal_state"] == "IN_PROGRESS"
+    message = retry["status_message"]
+    assert message.startswith("This proposal already exists and its run is executing")
+    assert "waiting for approval" not in message
+    assert "does not say whether money has moved" in message
+
+
+def test_status_message_says_what_each_status_means():
+    d, _, _ = dispatcher()
+    waiting = d.dispatch("propose_pay_supplier", event(PAY))
+    assert waiting["status"] == "AWAITING_APPROVAL"
+    assert waiting["status_message"] == (
+        "Nothing has run yet. The proposal waits for approval by someone other than the proposer."
+    )
+    assert tools_mod._status_message("BLOCKED") == (
+        "Policy blocked this proposal. Nothing has run and nothing will run."
+    )
 
 
 def test_proposal_id_is_derived_and_a_retry_returns_the_existing_proposal():
@@ -281,6 +385,8 @@ def test_retry_reports_the_existing_executions_real_state(execution_status, outc
     assert retry["proposal_state"] == state
     assert retry["status"] == f"EXISTING_PROPOSAL_{state}"
     assert retry["status"] != "AWAITING_APPROVAL"
+    assert retry["status_message"].startswith("This proposal already exists")
+    assert "Nothing has run yet" not in retry["status_message"]
     assert len(sfn.executions) == 1
 
 

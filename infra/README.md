@@ -16,7 +16,7 @@ full path from an empty AWS account to a working demo, see
 Dependencies run in one direction only: the kit stacks depend on the spine, and the agent
 stack depends on the kit stacks. A kit stack
 imports the spine's tables, key, approval role and that kit's reader. The agent stack imports
-each kit's root state machine ARNs, because a kit's propose tools start that kit's executions.
+each kit's root state machine Amazon Resource Names (ARNs), because a kit's propose tools start that kit's executions.
 No kit stack refers to the agent stack and no stack refers to a later one, so each stack can
 be deployed after the ones it needs and destroyed before them.
 
@@ -52,8 +52,16 @@ make sync
 make check
 make synth-test
 make synth  ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [KITS=k1,k4]
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [KITS=k1,k4]
+make bootstrap ACCOUNT=<12-digit id>
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [KITS=k1,k4] [CDK_ARGS=...]
 ```
+
+`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/ap-southeast-2` once per account from
+the repository root, where no `cdk.json` loads the app, so it needs no alert address.
+`CDK_ARGS` passes extra CDK CLI arguments to `cdk synth` and `cdk deploy`. `cdk deploy` asks a
+person at a terminal to approve AWS Identity and Access Management (IAM) changes. A shell
+with no terminal (a continuous
+integration (CI) job, a coding agent) passes `CDK_ARGS="--require-approval never"`.
 
 `make check` (lint, secret scan, offline tests) and `make synth-test` must pass on the exact
 commit being deployed. `make synth-test` synthesises the full app and checks the exact IAM
@@ -69,10 +77,11 @@ needed for a deploy (see [docs/testing.md](../docs/testing.md) for the sandbox l
 cd infra
 npx -y aws-cdk@2.1144.0 synth --all -c account=111122223333 -c alert_email=you@example.com
 npx -y aws-cdk@2.1144.0 deploy --all --outputs-file cdk-outputs.json \
-    -c account=<12-digit id> -c alert_email=<address>
+    -c account=<12-digit id> -c alert_email=<address> [--require-approval never]
 ```
 
-Add `-c kits=k1,k4` to either when `KITS` is set. `cdk deploy --all` orders the stacks itself:
+Add `-c kits=k1,k4` to either when `KITS` is set, and the contents of `CDK_ARGS` at the end.
+`cdk deploy --all` orders the stacks itself:
 spine, kit stacks, agent stack. `infra/cdk-outputs.json` holds the stack outputs (Gateway URL,
 Runtime ARN, user pool client, approval API URL, secret ARN, tenants table). `awxpoc --config`
 and `scripts/deployed_security_checks.py` read it. It is git-ignored.

@@ -60,16 +60,34 @@ def _guard(book: LoanBook, ctx: PolicyContext) -> Mapping[str, Any] | None:
     return None
 
 
+def own_loan_ids(book: LoanBook, ctx: PolicyContext) -> list[str]:
+    """The loans whose borrower is the server-resolved caller (tenant and account), sorted."""
+    return [
+        t.loan_id
+        for t in book.loans()
+        if t.borrower_tenant_id == ctx.tenant.tenant_id
+        and t.borrower_account == ctx.tenant.connected_account_id
+    ]
+
+
 def _borrower_position(args: Mapping[str, Any], ctx: PolicyContext) -> Mapping[str, Any]:
-    intent = validate_disburse(args)
+    named = "loan_id" in args
+    intent = validate_disburse(args) if named else validate_reconcile(args)
     try:
         book, _ = load_book(ctx.platform_store)
     except PortfolioNotOpen:
         return {"blocked": NOT_OPEN}  # a stated not-configured answer
     if (stop := _guard(book, ctx)) is not None:
         return stop
+    own = own_loan_ids(book, ctx)
+    if not named:
+        if len(own) != 1:
+            # No loan for this caller (the book allows one per borrower tenant).
+            return {"your_loan_ids": own}
+        intent = {"loan_id": own[0]}
     terms = book.loan_for_tenant(intent["loan_id"], ctx.tenant)
     return {
+        "your_loan_ids": own,
         **_loan_summary(book, terms.loan_id),
         "wallet_available": available_balance(ctx.read, terms.currency),
         "weeks": [
