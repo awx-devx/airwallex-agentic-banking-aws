@@ -144,15 +144,21 @@ def test_amount_and_request_id_come_from_code_not_the_model(tools):
     assert computed["disputed_amount"] == {"amount": "15.00", "currency": "AUD"}
 
 
-def test_tenant_isolation_kit4_runs_as_the_platform_whatever_the_claim(tools):
-    """Kits 1-4 move the platform's own money: a tenant claim is ignored, the kit store and
-    every read are the platform's, and no read carries x-on-behalf-of."""
+def test_tenant_isolation_kit4_serves_platform_callers_only(tools):
+    """Kits 1-4 move the platform's own money and serve platform callers only: another
+    tenant's claim is refused before anything is read; for the platform caller the kit store
+    and every read are the platform's, and no read carries x-on-behalf-of."""
     h, _ = tools
     h.store("tenant-b").put(
         "evidence/dsp_t/ev_planted", {"dispute_id": "dsp_t"}, expected_version=None
     )
     raw = dict(challenge_input("dsp_t"), evidence_ids=["ev_order_history", "ev_planted"])
-    out = h.call("propose_challenge_dispute", raw, tenant_id="tenant-b")
+    before = len(h.reader.calls)
+    for claim in ("tenant-b", "k5:operator"):
+        refused = h.call("propose_challenge_dispute", raw, tenant_id=claim)
+        assert refused["error"]["code"] == "TENANT_SCOPE", (claim, refused)
+    assert len(h.reader.calls) == before
+    out = h.call("propose_challenge_dispute", raw)
     assert out["risk_tier"] == "BLOCKED"  # tenant-b's planted entry is invisible
     assert any("ev_planted" in r for r in out["reasons"])
     assert all(c["payload"]["tenant_id"] == "platform" for c in h.reader.calls)

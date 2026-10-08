@@ -29,6 +29,7 @@ defends against:
 | The adapter re-reads the proposal and its decisions, checks the operation's kit and hash, and checks tenant scope before any send | `awx_spine_aws.handlers.adapter` | `packages/awx_spine_aws/tests` |
 | Each kit has its own reader Lambda: GET only, that kit's path allowlist, a payload naming another kit is refused | `awx_spine_aws.handlers.reader`, `SpineStack.reader_for` | `packages/awx_spine_aws/tests`, `tests/security`, deployed check 6 |
 | Connected-account operations are bound to the run's tenant by kit code, and the runner checks tenant scope before every operation (deny by default) | `awx_common.tenancy.bind_operation`, `check_tenant_scope` (rule 4) | `packages/awx_common/tests`, `tests/security/test_cross_kit_tenants.py` |
+| Kits 1 to 4 serve platform callers only: a caller whose `tenant_id` claim is not exactly `platform` (another tenant, with or without a tenants-table row, or no claim) is refused with `TENANT_SCOPE` before the tool reads its arguments | `awx_agent.identity.CallerIdentity.run_tenant`, `awx_agent.handlers.tools` | `tests/security/test_platform_kit_callers.py`, `packages/awx_agent/tests`, deployed checks 5 and 5c |
 | Every tenants-table row belongs to one kit and role; a caller whose row belongs to another kit is refused | `awx_common.tenancy.resolve_in_kit`, `awx-deploy tenants put` | `tests/security/test_cross_kit_tenants.py`, deployed check 5 |
 | Each kit's ledger access is limited by IAM to its own partitions (`dynamodb:LeadingKeys <kit>#*`) | kit-step, tool and kit-function roles | `tests/security`, `infra` synth tests |
 | Writes are idempotent and reconciled before any resend after an unknown outcome | `awx_spine.executor.MutationExecutor`, `awx_spine.endpoints` (rule 9, M1) | `packages/awx_spine/tests`, `tests/contract`, kit fault tests on FakeAirwallex |
@@ -39,8 +40,11 @@ defends against:
 
 Users sign in to one Cognito user pool. An administrator sets each user's immutable
 `custom:tenant_id` attribute and adds the user to the `requester` or `approver` group. A Pre
-Token Generation trigger copies the attribute into a `tenant_id` claim on the access token. A
-user without the attribute gets no claim, and every tenant-scoped API refuses them.
+Token Generation trigger copies the attribute into a `tenant_id` claim on the access token.
+The tool Lambdas and the approval application programming interface (API) read the tenant from
+that claim only, never from `custom:tenant_id`, and refuse a `tenant_id` claim that is present
+but not a non-empty string.
+A user without the attribute gets no claim, and every tenant-scoped API refuses them.
 
 The AgentCore Runtime, the AgentCore Gateway and the approval API all accept access tokens of
 the same app client, so one sign-in works everywhere. The Gateway's interceptor verifies the
@@ -48,10 +52,16 @@ token signature (RS256 against the user pool's keys) and passes the verified tok
 tool Lambda, which verifies it again. A direct Lambda invoke with a made-up identity is
 refused.
 
-The tenant comes only from the verified token. The tool Lambda resolves it through the tenants
-table in the tool's own kit. Kits 1 to 4 run on the platform's own Airwallex account. Kits 5 to
-8 act on customers' connected accounts, and a customer row names exactly one connected account
-that no other row may use. Kit code builds every connected-account operation from the
+The tenant comes only from the verified token. Kits 1 to 4 run on the platform's own Airwallex
+account and serve platform callers only. Their tool Lambdas accept a caller whose `tenant_id`
+claim is exactly `platform` and refuse every other caller with `TENANT_SCOPE`, before the tool
+reads its arguments: a tenant with a tenants-table row in another kit, a tenant with no row at
+all (for example `k5:operator`, a mistyped id, or a user created before its kit's rows were
+loaded) and a caller with no claim. Whether a tenant has a row never changes that answer. For
+kits 5 to 8 the tool Lambda resolves the claim through the tenants table in the tool's own
+kit, and refuses a caller with no claim, the `platform` claim, an unknown tenant or a row bound
+to another kit. Kits 5 to 8 act on customers' connected accounts, and a customer row names
+exactly one connected account that no other row may use. Kit code builds every connected-account operation from the
 resolved tenant with `bind_operation` or `bind_platform_operation`. The model never names an
 account.
 
@@ -83,7 +93,33 @@ Demo user passwords live in AWS Secrets Manager, never in files
 `scripts/deployed_security_checks.py` runs read-only against a deployment and calls no tool
 that moves money. It prints one PASS or FAIL line per check and no secret, token or password.
 [docs/deployment.md](deployment.md#check-the-deployment) lists each check and what it
-proves.
+proves. The checks on caller identity and tenancy work as follows:
+
+- Check 0 follows the Gateway's `nextCursor` through every page of `tools/list` and reports
+  the full tool count and the number of pages. It fails when paging stops early: a page whose
+  Hypertext Transfer Protocol (HTTP) status is not 200 or that is not a `tools/list` result, a
+  tool entry with no name, a repeated cursor, or 50 pages without an end. On 8 Oct 2026 a
+  deployment of kits 1 to 8 listed 61 tools across 3 pages.
+- Check 3 calls `k1___read_balances` as `demo-platform-requester` and passes only on positive
+  evidence that the verified caller reached the tool code: a read result, or `READ_FAILED`
+  when the reader could not complete the read. A missing caller token, any other error or a
+  malformed reply fails it.
+- Check 5 calls `k1___read_balances` as `demo-k6-operator` (tenant `k6:operator`, a row in
+  kit 6). It passes only on the tool plane's own refusal: error code `TENANT_SCOPE` with a
+  message containing "serves platform callers only". Any other reply fails. That includes
+  `NOT_CONFIGURED`, which means the call got past the tenant check, and a `TENANT_SCOPE`
+  raised later, by the reader for example. So the result does not depend on whether kit 1 has
+  been seeded.
+- Check 5c makes the same call as `demo-k5-operator-approver` (tenant `k5:operator`, which
+  has no tenants-table row) and passes only on the same refusal. If that user does not exist,
+  the check fails and names the user to create.
+- A reply of an unexpected shape, a network error or a timeout fails the check it belongs to.
+  If a step cannot go on, the script records a FAIL for the run and still prints its summary
+  line.
+
+On 8 Oct 2026, check 5 failed on a deployment from a fresh clone into a new account: a caller
+whose tenant had no tenants-table row read the platform's balances through kit 1. After the fix
+that kits 1 to 4 serve platform callers only, every check passed on that deployment.
 
 ## Known limits
 

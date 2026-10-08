@@ -103,6 +103,12 @@ nothing sent. Only a throttle on the invoke itself, where the Lambda never ran, 
 Postcondition and Audit have no automatic retry. A child state machine has no approval states:
 its parent's approval covers it.
 
+A run that fails (an operation that fails, a postcondition that does not hold) still passes
+through Postcondition and Audit to Done, so its Step Functions execution ends `SUCCEEDED`.
+The proposal's status in the proposals table (`awxpoc proposals show <proposal_id>`) is the
+source of truth for a run's outcome: an execution can succeed while recording a `FAILED`
+proposal.
+
 `packages/awx_spine_aws/tests/test_asl_equivalence.py` interprets the synthesised state
 machine definition and checks it reaches the same outcome as `local_runner`.
 

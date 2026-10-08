@@ -56,8 +56,8 @@ def test_demo_plan_after_deposit():
     assert kinds["ob-contractor-gbp"] is DecisionKind.ESCALATE
     assert plan.breaches == ()
     (conv,) = plan.conversions
-    assert conv.buy == Money.of("6031.91", "EUR")  # 7525.70 + 6.21 fee - 1500 headroom
-    assert conv.sell == Money.of("6644.76", "USD")  # 6031.91 * 1.08 * 1.02, rounded up
+    assert conv.buy == Money.of("6038.55", "EUR")  # 7525.70 + 12.85 fee - 1500 headroom
+    assert conv.sell == Money.of("6652.07", "USD")  # 6038.55 * 1.08 * 1.02, rounded up
     assert plan.projected["EUR"] == Money.of("500", "EUR")
 
 
@@ -94,11 +94,20 @@ def test_unknown_swift_fee_escalates():
 
 
 def test_fee_table_is_config():
-    from awx_k1_treasury.money_rules import GUIDE_SWIFT_FEES
+    small = PlanConfig(swift_fees={"EUR": Money.of("6.21", "EUR")})
+    plan = build_plan(DEMO_BOOK, bal("42000"), RATES, small, only=["ob-supplier-eur"])
+    assert plan.conversions[0].buy == Money.of("6031.91", "EUR")
 
-    guide = PlanConfig(swift_fees=dict(GUIDE_SWIFT_FEES))
-    plan = build_plan(DEMO_BOOK, bal("42000"), RATES, guide, only=["ob-supplier-eur"])
-    assert plan.conversions[0].buy == Money.of("6038.55", "EUR")
+
+@pytest.mark.parametrize("charged", ["6.21", "6.22", "12.85"])
+def test_the_default_plan_keeps_the_eur_floor_whichever_recorded_fee_is_charged(charged):
+    """8 Oct 2026: the sandbox charged 6.22 on some EUR SWIFT payouts; sized at 6.21, the EUR
+    wallet ended 0.01 under its floor after paying."""
+    plan = build_plan(DEMO_BOOK, bal("42000"), RATES, PlanConfig(), only=["ob-supplier-eur"])
+    (conv,) = plan.conversions
+    (payout,) = plan.payouts
+    eur_after = bal("42000")["EUR"] + conv.buy - payout.amount - Money.of(charged, "EUR")
+    assert eur_after >= DEMO_BOOK.floors["EUR"]
 
 
 def test_book_requires_floors():
@@ -216,7 +225,7 @@ def test_matrix_blocks_an_unfunded_or_escalated_obligation():
 
 def test_matrix_thin_funding_reserve_needs_a_person():
     # Funding wallet ends 1,500 above its 20,000 floor, inside the 2,000 cushion.
-    plan, t = tier_for(bal("28144.76"))
+    plan, t = tier_for(bal("28152.07"))
     assert plan.projected["USD"] - DEMO_BOOK.floors["USD"] == Money.of("1500", "USD")
     assert t.tier is RiskTier.SINGLE
     assert any("reserve floor" in r for r in t.reasons)

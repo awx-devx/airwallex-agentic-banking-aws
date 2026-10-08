@@ -4,7 +4,12 @@
 mints the M2 book id, through seed.seed_deployed. Args (a JSON object, checked strictly):
 
     {"beneficiaries": {"<obligation_id>": "<poc-i1- beneficiary id>", ...},
-     "book_version": "<slug>", "replace": false}
+     "book_version": "<slug>", "replace": false, "scenario_start": "<YYYY-MM-DD>"}
+
+The demo book's due dates move so its scenario starts at `scenario_start` (an ISO date, read as
+midnight UTC, or an ISO date-time with a timezone). Without it the scenario starts at the seed
+time rounded up to the next whole hour, so every seeded obligation falls due within the 72
+hours after the seed. Reseeding with `replace` moves the dates again.
 
 Every beneficiary is checked through `ctx.read` (it exists and its nickname starts `poc-i1-`);
 the command refuses when `ctx.read` is None. A second run is refused unless `replace` is true,
@@ -14,6 +19,7 @@ and a replace keeps the book id. It moves no money: OperatorContext has no write
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from awx_common.operator_commands import (
@@ -26,7 +32,25 @@ from awx_common.operator_commands import (
 from .book import load_book
 from .seed import SeedRefused, seed_deployed
 
-_ARGS = {"beneficiaries", "book_version", "replace"}
+_ARGS = {"beneficiaries", "book_version", "replace", "scenario_start"}
+
+
+def _start(value: Any, now: datetime) -> datetime:
+    """When the seeded scenario starts: `scenario_start`, or the next whole hour after `now`."""
+    if value is None:
+        hour = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+        return hour if hour == now else hour + timedelta(hours=1)
+    if not isinstance(value, str):
+        raise OperatorCommandError("scenario_start must be an ISO date or date-time string")
+    try:
+        if len(value) == 10:
+            return datetime.combine(date.fromisoformat(value), datetime.min.time(), tzinfo=UTC)
+        start = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise OperatorCommandError(f"scenario_start {value!r} is not an ISO date") from None
+    if start.tzinfo is None:
+        raise OperatorCommandError("scenario_start needs a timezone, for example 2026-10-19T09:00Z")
+    return start
 
 
 def _seed_treasury_book(ctx: OperatorContext, args: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -45,11 +69,17 @@ def _seed_treasury_book(ctx: OperatorContext, args: Mapping[str, Any]) -> Mappin
         raise OperatorCommandError("book_version is required")
     if ctx.read is None:
         raise OperatorCommandError("seed_treasury_book checks every beneficiary; read is required")
+    start = _start(args.get("scenario_start"), ctx.now)
     store = ctx.platform_store
     replacing = require_fresh_or_replace(load_book(store) is not None, args, "the treasury book")
     try:
         report = seed_deployed(
-            store, dict(bens), book_version=version, read=ctx.read, replace_existing=replacing
+            store,
+            dict(bens),
+            book_version=version,
+            read=ctx.read,
+            replace_existing=replacing,
+            start=start,
         )
     except SeedRefused as exc:
         raise OperatorCommandError(str(exc)) from None

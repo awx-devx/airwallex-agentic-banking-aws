@@ -61,6 +61,7 @@ def claims(**over) -> dict:
         "sub": "user-requester",
         "username": "requester1",
         "cognito:groups": ["requester"],
+        "tenant_id": "platform",  # kits 1-4 serve platform callers only; tenant_id=None drops it
     }
     base.update(over)
     return {k: v for k, v in base.items() if v is not None}

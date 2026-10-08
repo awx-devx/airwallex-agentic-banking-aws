@@ -18,7 +18,7 @@ _DATE = {"type": "string", "format": "date", "pattern": r"^[0-9]{4}-[0-9]{2}-[0-
 _CARD_ID = {
     "type": "string",
     "pattern": r"^[A-Za-z0-9_-]{1,64}$",
-    "description": "Airwallex card id, as returned by read_card_controls or a proposal result",
+    "description": "Airwallex card id, as returned by read_card_controls",
 }
 
 _TERMS_PROPERTIES: dict[str, Any] = {
@@ -40,7 +40,14 @@ _TERMS_PROPERTIES: dict[str, Any] = {
     "cancellation_notice_days": {"type": "integer", "minimum": 0, "maximum": 365},
     "start_date": _DATE,
     "renewal_date": _DATE,
-    "terms_document_sha256": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+    "terms_document_sha256": {
+        "type": "string",
+        "pattern": r"^[0-9a-f]{64}$",
+        "description": "Lower-case hex SHA-256 of the exact vendor terms document these values "
+        "were read from (for example the output of `sha256sum terms.pdf`). The person supplies "
+        "it with the document; it is recorded in the proposal so the approval names one "
+        "document. Never invent one: ask the person for it",
+    },
     "forecast_flows": {
         "type": "array",
         "maxItems": 200,
@@ -81,6 +88,17 @@ def _obj(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
 
 _TERMS_SCHEMA = _obj(_TERMS_PROPERTIES, _TERMS_REQUIRED)
 _CARD_SCHEMA = _obj({"card_id": _CARD_ID}, ["card_id"])
+# Exactly one of card_id or purchase_ref; read_card_controls checks it (reads.py).
+_CARD_OR_PURCHASE_SCHEMA = _obj(
+    {
+        "card_id": _CARD_ID,
+        "purchase_ref": {
+            **_TERMS_PROPERTIES["purchase_ref"],
+            "description": "The purchase_ref an approved issue_card used; finds that card",
+        },
+    },
+    [],
+)
 _CARD_ACTION_SCHEMA = _obj(
     {"card_id": _CARD_ID, "reason": {"type": "string", "maxLength": 200}}, ["card_id"]
 )
@@ -97,8 +115,10 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "read_card_controls",
         ToolKind.READ,
-        "Read a card's status, authorization controls and remaining limits.",
-        _CARD_SCHEMA,
+        "Read a card's id, status, authorization controls and remaining limits. Give exactly "
+        "one of card_id or purchase_ref; after an approved issue_card, pass its purchase_ref "
+        "to learn the new card's id.",
+        _CARD_OR_PURCHASE_SCHEMA,
     ),
     ToolSpec(
         "read_card_transactions",
@@ -111,7 +131,9 @@ TOOLS: tuple[ToolSpec, ...] = (
         "propose_issue_card",
         ToolKind.PROPOSE,
         "Propose a cardholder and a virtual card whose controls enforce the chosen plan. Needs "
-        "human approval of the exact control set before anything is created.",
+        "human approval of the exact control set before anything is created. For a card the "
+        "limit test may run on, use a purchase_ref starting 'limit-test-'. Once approved, "
+        "read_card_controls with the same purchase_ref returns the card id.",
         _TERMS_SCHEMA,
     ),
     ToolSpec(
@@ -143,7 +165,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         "propose_run_limit_test",
         ToolKind.PROPOSE,
         "Run the sandbox limit-boundary test on a fresh, pre-funded kit 2 card: wrong currency, "
-        "wrong merchant category, limit + 0.01, exactly the limit, and the cumulative limit.",
+        "wrong merchant category, limit + 0.01, exactly the limit, and the cumulative limit. "
+        "Runs only on a card issued with a purchase_ref starting 'limit-test-'.",
         _CARD_SCHEMA,
     ),
 )

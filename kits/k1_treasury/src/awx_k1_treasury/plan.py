@@ -17,7 +17,7 @@ from awx_common import Money
 
 from .book import Priority, TreasuryBook
 from .money_rules import (
-    SANDBOX_SWIFT_FEES,
+    SWIFT_FEES,
     ConversionLeg,
     IndicativeRate,
     PayoutLeg,
@@ -44,7 +44,7 @@ FUNDED = frozenset({DecisionKind.FUND, DecisionKind.CONVERT_AND_FUND})
 class PlanConfig:
     rate_tolerance: Decimal = Decimal("0.02")  # headroom between indicative rate and quote
     deferral_buffer: Decimal = Decimal("0.25")  # a deferrable payment must leave floor * 1.25
-    swift_fees: Mapping[str, Money] = field(default_factory=lambda: dict(SANDBOX_SWIFT_FEES))
+    swift_fees: Mapping[str, Money] = field(default_factory=lambda: dict(SWIFT_FEES))
 
     def __post_init__(self) -> None:
         if not Decimal(0) <= self.rate_tolerance <= Decimal("0.2"):

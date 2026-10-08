@@ -14,7 +14,10 @@ With AWX_LIVE=1 it runs against the real sandbox through the same local_runner:
   pending authorisation (kit 1 creates none).
 The live variant reads the sandbox key through `EnvFileCredentials` and calls the sandbox
 through `AirwallexClient` directly. Set AWX_K1_SHAPES to a path (for example
-kits/k1_treasury/evidence/live-run-1.json) to write the sanitised evidence of the run there.
+kits/k1_treasury/evidence/live-run-1.json) to write the sanitised evidence of the run there; a
+failed run writes it too, with `outcome: failed` and the error. Each failure message carries the
+run's full detail, postcondition included. The live run asserts that every wallet ends at or
+above its floor and that the payout is PAID; it does not assert the fee the sandbox charged.
 """
 
 from __future__ import annotations
@@ -273,9 +276,9 @@ def _live_beneficiary(client) -> str:
 
 
 @pytest.mark.skipif(not LIVE, reason="set AWX_LIVE=1 to run against the sandbox")
-def test_kit1_acceptance_against_the_sandbox(contradiction):  # pragma: no cover - live only
-    import json
-
+def test_kit1_acceptance_against_the_sandbox(
+    contradiction, explain, evidence_file
+):  # pragma: no cover - live only
     from awx_common import ReadRequest
     from awx_common.workflow import PolicyContext, PolicyDecision, StepContext
     from awx_k1_treasury.locks import ObligationLocked
@@ -283,7 +286,7 @@ def test_kit1_acceptance_against_the_sandbox(contradiction):  # pragma: no cover
 
     supplier = {"obligation_ids": ["ob-supplier-eur"]}
     seen: dict = {"runs": []}
-    with sandbox_lock():
+    with evidence_file(seen, os.environ.get("AWX_K1_SHAPES")), sandbox_lock():
         client = AirwallexClient(EnvFileCredentials())
         ben = _live_beneficiary(client)
         for label, raw, approvers, tier in (
@@ -298,7 +301,14 @@ def test_kit1_acceptance_against_the_sandbox(contradiction):  # pragma: no cover
             env = LiveEnv(client, ben, contradiction)
             floors = env.store.get("book/current").value["floors"]
             lock_out = env.run("lock_rate", supplier)
-            assert lock_out.state == "SUCCEEDED", (lock_out.detail, lock_out.postcondition)
+            assert lock_out.state == "SUCCEEDED", explain(
+                {
+                    "label": label,
+                    "lock_rate": lock_out.state,
+                    "detail": lock_out.detail,
+                    "post": lock_out.postcondition,
+                }
+            )
             out = env.run("execute_plan", raw, approvers=approvers)
             run = {
                 "label": label,
@@ -309,18 +319,22 @@ def test_kit1_acceptance_against_the_sandbox(contradiction):  # pragma: no cover
                 "conversion": out.proposal.computed.get("conversions"),
             }
             seen["runs"].append(run)
-            assert out.state == "SUCCEEDED", run
-            assert out.proposal.risk_tier is tier
+            assert out.state == "SUCCEEDED", explain(run)
+            assert out.proposal.risk_tier is tier, explain(run)
             after = env.balances()
+            run["end_balances"] = {cur: after[cur] for cur in ("EUR", "USD")}
+            run["floors"] = {cur: floors[cur] for cur in ("EUR", "USD")}
             for cur in ("EUR", "USD"):
-                assert after[cur] >= floors[cur], (cur, after[cur], floors[cur])
+                assert after[cur] >= floors[cur], explain(run)  # the floor held, fee included
             conv_rid = out.results["convert"][0].request_id
             tr_rid = out.results["transfer"][0].request_id
             convs = client.read(ReadRequest("/api/v1/fx/conversions", {"request_id": conv_rid}))
             trs = client.read(ReadRequest("/api/v1/transfers", {"request_id": tr_rid}))
-            assert len(convs["items"]) == 1
-            assert len(trs["items"]) == 1
-            assert trs["items"][0]["status"] == "PAID"  # nothing left at SENT
+            assert len(convs["items"]) == 1, explain(run)
+            assert len(trs["items"]) == 1, explain(run)
+            run["transfer_status"] = trs["items"][0]["status"]
+            run["fee_charged"] = trs["items"][0].get("fee_amount")
+            assert trs["items"][0]["status"] == "PAID", explain(run)  # nothing left at SENT
             quote = out.results.get("quote") or lock_out.results["quote"]
             run["shapes"] = {
                 "quote": _shape(quote[0].body or {}),
@@ -354,8 +368,8 @@ def test_kit1_acceptance_against_the_sandbox(contradiction):  # pragma: no cover
             # ...and a new proposal for the same obligation is blocked.
             sends = len(env.sent)
             replay = env.run("execute_plan", supplier)
-            assert replay.state == "BLOCKED"
-            assert len(env.sent) == sends
+            assert replay.state == "BLOCKED", explain(run)
+            assert len(env.sent) == sends, explain(run)
             end = read_lock(env.store, "ob-supplier-eur")
             assert end.state is LockState.PAID
             # The evidence, recorded in the shapes file as well as asserted.
@@ -393,13 +407,8 @@ def test_kit1_acceptance_against_the_sandbox(contradiction):  # pragma: no cover
                 if str(t.get("reference", "")).startswith("poc-i1-")
             ),
         }
-    a, b = seen["runs"]
-    strip = ("quote_id", "quote_valid_to", "sell")
-    assert [{k: v for k, v in c.items() if k not in strip} for c in a["conversion"]] == [
-        {k: v for k, v in c.items() if k not in strip} for c in b["conversion"]
-    ]  # the same conversion changed tier
-    if os.environ.get("AWX_K1_SHAPES"):
-        from awx_common import to_jsonable
-
-        with open(os.environ["AWX_K1_SHAPES"], "w") as fh:
-            json.dump(to_jsonable(seen), fh, indent=2, default=str)
+        a, b = seen["runs"]
+        strip = ("quote_id", "quote_valid_to", "sell")
+        assert [{k: v for k, v in c.items() if k not in strip} for c in a["conversion"]] == [
+            {k: v for k, v in c.items() if k not in strip} for c in b["conversion"]
+        ], explain(seen["runs"])  # the same conversion changed tier

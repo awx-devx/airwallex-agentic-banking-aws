@@ -6,6 +6,16 @@
 #   K1_BEN_SUPPLIER_EUR  the id of the poc-i1-supplier-de EUR SWIFT beneficiary in the
 #                        sandbox (create it first if it does not exist)
 #   K1_BEN_SHIPPING      a US LOCAL poc-i1- beneficiary for ob-shipping (create it first)
+# Dates: the seed moves the demo book's due dates so its scenario starts at the seed time,
+# rounded up to the next whole hour, and every seeded obligation falls due within the next
+# 72 hours. To pin the start instead, add `scenario_start: "<YYYY-MM-DD>"` (midnight UTC) or an
+# ISO date-time with a timezone to the args below.
+# Re-seed: kits/k1_treasury/examples/reseed_treasury_book.yaml (README "Setting up a deployed
+# kit" has the command). A re-seed moves the dates only: a paid obligation stays PAID on this
+# deployment, so execute_plan pays each obligation id once. To pay again, map an unpaid one.
+# More obligations: the book also holds ob-saas-gbp and ob-contractor-gbp (GBP LOCAL) and
+# ob-office-usd (US LOCAL). Create a poc-i1- beneficiary for each and add a line for it under
+# `beneficiaries` to show the full scenario.
 # Before or after: fund the platform wallets with a sandbox deposit, under
 # `flock /tmp/awx-sandbox.lock` (not an awx-deploy step: nothing here moves money).
 kit: k1

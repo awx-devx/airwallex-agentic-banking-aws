@@ -9,7 +9,8 @@ import pytest
 from awx_common import Money
 from awx_k1_treasury.book import TransferMethod
 from awx_k1_treasury.money_rules import (
-    GUIDE_SWIFT_FEES,
+    RECORDED_SWIFT_FEES,
+    SWIFT_FEES,
     BadProviderData,
     ConversionLeg,
     IndicativeRate,
@@ -40,26 +41,40 @@ def m(minor: int, cur: str = "EUR") -> Money:
     return Money.from_minor(minor, cur)
 
 
-def test_swift_eur_fee_is_the_sandbox_figure_not_the_guide_figure():
-    assert payout_fee(TransferMethod.SWIFT, "EUR") == Money.of("6.21", "EUR")  # [tr-swift-100]
-    assert GUIDE_SWIFT_FEES["EUR"] == Money.of("12.85", "EUR")  # reference only
-    assert payout_fee(TransferMethod.SWIFT, "EUR", GUIDE_SWIFT_FEES) == Money.of("12.85", "EUR")
+def test_swift_eur_fee_is_sized_at_the_largest_fee_on_record():
+    # The guide's flat 12.85 is above the sandbox charges (6.21, and 6.22 on 8 Oct 2026).
+    assert payout_fee(TransferMethod.SWIFT, "EUR") == Money.of("12.85", "EUR")
+    assert all(f <= SWIFT_FEES["EUR"] for f in RECORDED_SWIFT_FEES["EUR"])
+    assert Money.of("6.22", "EUR") in RECORDED_SWIFT_FEES["EUR"]
+    small = {"EUR": Money.of("6.21", "EUR")}
+    assert payout_fee(TransferMethod.SWIFT, "EUR", small) == Money.of("6.21", "EUR")  # config
     assert payout_fee(TransferMethod.LOCAL, "USD") == Money.zero("USD")
     with pytest.raises(UnknownFee):
         payout_fee(TransferMethod.SWIFT, "GBP")
 
 
+@pytest.mark.parametrize("charged", ["6.21", "6.22", "12.85"])
+@given(cents, non_neg_cents)
+def test_a_wallet_at_its_floor_keeps_it_whichever_recorded_fee_is_charged(charged, amt_c, floor_c):
+    """8 Oct 2026: sized at 6.21, a 6.22 charge left the EUR wallet 0.01 under its floor."""
+    amount, floor = m(amt_c), m(floor_c)
+    fee = payout_fee(TransferMethod.SWIFT, "EUR")  # what the plan sizes with
+    buy = min_conversion(amount + fee, floor, floor)  # the wallet starts on its floor
+    after = floor + buy - amount - Money.of(charged, "EUR")
+    assert after >= floor
+
+
 @given(cents)
 def test_payout_need_includes_exactly_one_fee(minor):
     amount = m(minor)
-    assert payout_need(amount, TransferMethod.SWIFT) - amount == Money.of("6.21", "EUR")
+    assert payout_need(amount, TransferMethod.SWIFT) - amount == Money.of("12.85", "EUR")
     assert payout_need(amount, TransferMethod.LOCAL) == amount
 
 
 @pytest.mark.parametrize("amount", ["1", "100", "1000", "4000"])
 def test_every_eur_swift_payout_costs_the_same_flat_fee(amount):
     a = Money.of(amount, "EUR")
-    assert payout_need(a, TransferMethod.SWIFT) == a + Money.of("6.21", "EUR")
+    assert payout_need(a, TransferMethod.SWIFT) == a + Money.of("12.85", "EUR")
 
 
 @given(cents, non_neg_cents, non_neg_cents)

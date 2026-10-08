@@ -49,7 +49,7 @@ pytestmark = [
     pytest.mark.skipif(
         bool(_MISSING),
         reason=f"set {', '.join(_MISSING)} to this sandbox account's fixture ids "
-        "(packages/awx_spine/README.md)",
+        '(docs/testing.md, "Contract fixtures")',
     ),
 ]
 

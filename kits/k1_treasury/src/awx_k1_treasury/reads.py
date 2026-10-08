@@ -4,6 +4,7 @@ locks) through ctx.store, and returns plain JSON for the model."""
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta
 from typing import Any
 
 from awx_common import RiskTier, to_jsonable
@@ -21,8 +22,19 @@ from .policy import PolicyConfig, approval_tier, confidence_band
 ReadFn = Callable[[Mapping[str, Any], PolicyContext], Mapping[str, Any]]
 
 
+# The window read_obligations reports on, from the read's own clock (`ctx.now`).
+DUE_WINDOW = timedelta(hours=72)
+
+
 class NoBook(K1Error):
     pass
+
+
+def due_window(due_at: datetime, now: datetime) -> str:
+    """OVERDUE at or before now, NEXT_72_HOURS up to and including now + 72 hours, else LATER."""
+    if due_at <= now:
+        return "OVERDUE"
+    return "NEXT_72_HOURS" if due_at <= now + DUE_WINDOW else "LATER"
 
 
 def _book(ctx: PolicyContext) -> TreasuryBook:
@@ -60,6 +72,8 @@ def build_reads(config: PolicyConfig | None = None) -> dict[str, ReadFn]:
             {
                 "book_version": book.book_version,
                 "funding_currency": book.funding_currency,
+                "as_of": ctx.now,
+                "due_window_hours": int(DUE_WINDOW.total_seconds() // 3600),
                 "obligations": [
                     {
                         "obligation_id": o.obligation_id,
@@ -67,6 +81,7 @@ def build_reads(config: PolicyConfig | None = None) -> dict[str, ReadFn]:
                         "amount": o.amount,
                         "method": o.method.value,
                         "due_at": o.due_at,
+                        "due_window": due_window(o.due_at, ctx.now),
                         "priority": o.priority.name,
                         "policy_exception": o.policy_exception,
                         "lock": _lock_view(ctx, o.obligation_id, cfg),

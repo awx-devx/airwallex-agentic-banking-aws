@@ -27,9 +27,12 @@ Synth tests need no AWS credentials. The root `conftest.py` gives them the place
 | `make check` | `sync`, then `lint`, `secret-scan` and `test` |
 | `make test` | `pytest -m "not sandbox and not synth and not live"` |
 | `make synth-test` | `pytest -m synth` |
-| `make sandbox-test` | `pytest -m sandbox` (calls the real sandbox) |
+| `make sandbox-test` | `pytest -m sandbox -rs` (calls the real sandbox, and lists each skipped test with its reason) |
 | `make lint` | `ruff check` and `ruff format --check` |
 | `make hooks` | sets `core.hooksPath` to `.githooks`, so the secret scan runs on every commit |
+
+`make check` and `make synth-test` take about 4 to 5 minutes each. pytest prints only dots
+while it runs, so a quiet terminal does not mean a hung run.
 
 To run one package or kit, pass its directory:
 
@@ -45,13 +48,58 @@ tests/contract` never reaches the sandbox.
 Sandbox runs need sandbox credentials: `AWX_CLIENT_ID` and `AWX_API_KEY` in the environment,
 or the file `~/.config/airwallex-sandbox/credentials.env`. Nothing prints them.
 
-A kit's live variant runs only when its switch is set as well as the marker: `AWX_LIVE=1` for
-kit 1, and `AWX_K2_LIVE=1`, `AWX_K3_LIVE=1` and `AWX_K6_LIVE=1` for kits 2, 3 and 6. Without
-the switch the same scenario runs on `FakeAirwallex`. Kits 5, 7 and 8 commit no live wiring:
-their sandbox scenarios always run on `FakeAirwallex`, and their READMEs describe one-off live
-sandbox runs driven by code that is not part of this repository. With `AWX_K7_LIVE=1` the kit 7
-live probes run and raise `NotImplementedError`; they are not implemented. Kit 4's live variant
-is skipped, because the sandbox account does not have online payments enabled.
+`make sandbox-test` passes `-rs`, so pytest lists every skipped test with its reason. A
+sandbox run that skipped contract tests still exits 0, and ends with a line that starts
+`CONTRACT SUITE SKIPPED` (every contract test skipped) or `CONTRACT SUITE PARTLY SKIPPED`.
+Without the fixture ids below, a green `make sandbox-test` reaches the sandbox from no
+contract test: its passes are kit acceptance tests on `FakeAirwallex`.
+
+### Contract fixtures
+
+The contract suite (`tests/contract/test_sandbox_contract.py`) uses long-lived objects in your
+sandbox account, named by environment variables. The whole module skips, naming the missing
+variables, until all of them are set:
+
+| Variable | Sandbox object | Finding its id |
+|---|---|---|
+| `AWX_CONTRACT_ACCT_A` | an ACTIVE connected account (`acct_...`) | `GET /api/v1/accounts`, or the connected accounts list in the sandbox web app |
+| `AWX_CONTRACT_ACCT_B` | a second ACTIVE connected account; the tests move 1.00 USD to it from the platform and charge it back | as above |
+| `AWX_CONTRACT_BENEFICIARY` | a platform USD LOCAL beneficiary, which the transfer tests pay 1.00 USD at a time | `GET /api/v1/beneficiaries`, its `id` |
+| `AWX_CONTRACT_CARDHOLDER` | an issuing cardholder | `GET /api/v1/issuing/cardholders`, its `cardholder_id` |
+| `AWX_CONTRACT_CARD` | an active card on that cardholder; each run sets its per-transaction limit to 0.01 USD | `GET /api/v1/issuing/cards`, its `card_id` |
+
+The tests also spend small USD amounts from the platform balance. The repository has no
+helper that creates these objects. Make them once in the sandbox web app, or with the API: the
+connected account and beneficiary calls are in "Sandbox objects to create first" in
+[deployment.md](deployment.md), and a cardholder and card come from
+`POST /api/v1/issuing/cardholders/create` and `POST /api/v1/issuing/cards/create`. Give each a
+`poc-` label, then export the ids before the run:
+
+```sh
+export AWX_CONTRACT_ACCT_A=acct_... AWX_CONTRACT_ACCT_B=acct_...
+export AWX_CONTRACT_BENEFICIARY=<beneficiary id> AWX_CONTRACT_CARDHOLDER=<cardholder id>
+export AWX_CONTRACT_CARD=<card id>
+make sandbox-test
+```
+
+### Kit live switches
+
+A kit's live variant runs only when its own switch is set as well as the `sandbox` marker.
+The contract fixture ids do not switch any of them on.
+
+| Kit | Switch | Without it |
+|---|---|---|
+| 1 | `AWX_LIVE=1` | the scenario runs on `FakeAirwallex` |
+| 2 | `AWX_K2_LIVE=1` | the scenario runs on `FakeAirwallex` |
+| 3 | `AWX_K3_LIVE=1` | the live test is skipped |
+| 6 | `AWX_K6_LIVE=1`, plus `AWX_K6_ACCOUNTS` naming the owner-only connected-accounts file | the scenario runs on `FakeAirwallex` |
+
+Kits 5, 7 and 8 commit no live wiring: their sandbox scenarios always run on `FakeAirwallex`,
+and their READMEs describe one-off live sandbox runs driven by code that is not part of this
+repository. With `AWX_K5_LIVE` set the kit 5 live test skips. With `AWX_K7_LIVE=1` the kit 7
+live probes run and raise `NotImplementedError`; they are not implemented. Kit 4's live
+variant is skipped, because the sandbox account does not have online payments enabled. Each
+kit README gives its exact command.
 
 Every kit shares one sandbox account, so anything that touches the sandbox holds
 `/tmp/awx-sandbox.lock` for its whole run. The kit acceptance tests take the lock themselves

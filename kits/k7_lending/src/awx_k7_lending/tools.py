@@ -26,9 +26,16 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "read_borrower_position",
         ToolKind.READ,
-        "One borrower's loan position from the subledger (principal, fee and arrears "
-        "outstanding, commitment remaining, closed weeks) and their current wallet balance.",
-        _obj(loan_id=_LOAN_ID),
+        "The caller's own loan id (your_loan_ids; a borrower has one loan) and that loan's "
+        "position from the subledger (principal, fee and arrears outstanding, commitment "
+        "remaining, closed weeks) with the caller's current wallet balance. loan_id is "
+        "optional: omit it when the caller has not named a loan, and call this first.",
+        {
+            "type": "object",
+            "properties": {"loan_id": _LOAN_ID},
+            "required": [],
+            "additionalProperties": False,
+        },
     ),
     ToolSpec(
         "read_weekly_collection_preview",
@@ -56,8 +63,13 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_disburse_advance",
         ToolKind.PROPOSE,
-        "Disburse the next tranche of an underwritten advance. Code sizes it to keep platform "
-        "cash above the reserve floor (full, partial or delayed); a person must approve it.",
+        "Disburse the next tranche of an underwritten advance. Takes only the loan_id; if the "
+        "borrower has not named it, call read_borrower_position without a loan_id to find "
+        "their own loan ids instead of asking. The "
+        "borrower cannot choose the amount. Code sizes the tranche from the loan's remaining "
+        "commitment and the platform's lending capacity (full, partial or delayed), whatever "
+        "amount the borrower asked for; say so instead of giving another reason. A person "
+        "must approve it.",
         _obj(loan_id=_LOAN_ID),
     ),
     ToolSpec(

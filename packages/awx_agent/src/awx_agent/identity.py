@@ -19,6 +19,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from awx_common.errors import TenantScopeViolation
+
 IDENTITY_FIELD = "_awx_caller"
 PLATFORM_TENANT = "platform"
 CONNECTED_ACCOUNT_KITS = frozenset({"k5", "k6", "k7", "k8"})
@@ -43,26 +45,35 @@ class CallerIdentity:
         if not isinstance(sub, str) or not sub:
             raise IdentityError("token has no sub claim")
         username = claims.get("username") or claims.get("cognito:username") or sub
-        tenant = claims.get("tenant_id") or claims.get("custom:tenant_id")
+        # The tenant is the `tenant_id` claim only, as the approval API reads it. The Pre Token
+        # Generation trigger writes it from custom:tenant_id; nothing reads custom:tenant_id here.
+        tenant = claims.get("tenant_id")
         groups = claims.get("cognito:groups") or claims.get("groups") or ()
         if isinstance(groups, str):
             groups = (groups,)
-        if tenant is not None and not isinstance(tenant, str):
-            raise IdentityError("tenant_id claim must be a string")
+        if "tenant_id" in claims and (not isinstance(tenant, str) or not tenant):
+            raise IdentityError("tenant_id claim must be a non-empty string")
         return cls(
             sub=sub,
             username=str(username),
-            tenant_id=tenant or None,
+            tenant_id=tenant,
             groups=tuple(sorted(str(g) for g in groups)),
         )
 
     def run_tenant(self, kit: str) -> str:
         """The tenant a kit runs as: the claim for kits 5-8, PLATFORM_TENANT for kits 1-4.
 
-        Kits 1-4 move the platform's own money, so a tenant claim on the caller is ignored for
-        them; kits 5-8 refuse a caller with no tenant claim.
+        Kits 1-4 move the platform's own money, so they serve platform callers only: a caller
+        whose tenant_id claim is not exactly PLATFORM_TENANT (another tenant, with or without a
+        tenants-table row, or no claim at all) is refused with TenantScopeViolation. Kits 5-8
+        refuse a caller with no tenant claim or the platform claim.
         """
         if kit not in CONNECTED_ACCOUNT_KITS:
+            if self.tenant_id != PLATFORM_TENANT:
+                raise TenantScopeViolation(
+                    f"kit {kit} serves platform callers only; this caller's tenant is not "
+                    f"{PLATFORM_TENANT!r}"
+                )
             return PLATFORM_TENANT
         if not self.tenant_id or self.tenant_id == PLATFORM_TENANT:
             raise IdentityError(f"kit {kit} needs a tenant_id claim on the caller")

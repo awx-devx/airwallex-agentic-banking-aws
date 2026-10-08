@@ -1,0 +1,23 @@
+# Args for `awx-deploy run k5 seed_platform_setup`: the seed_platform_setup args of
+# deploy/k5.yaml with "replace": true, to move the demo obligation's dates to a later day.
+# Pass the same --var values as for deploy/k5.yaml, with K5_DUE_ON set to today's UTC date.
+# A replace keeps the capital ledger and its book id; awx-deploy refuses it while any kit 5
+# execution is RUNNING. Keep this file in step with deploy/k5.yaml (a test checks it).
+replace: true
+currency: USD
+reserve_floor: "600"
+high_risk_bridge: "1000"
+max_bridge_per_tenant: "800"
+max_bridge_days: 7
+card_programs:
+  standard: {per_transaction_limit: "100", monthly_limit: "250",
+             allowed_currencies: [USD], allowed_merchant_categories: ["5734"]}
+tenants:
+  - {tenant_id: t-alpha, connected_account_id: "${K5_ACCT_ALPHA}", display_name: Alpha}
+  - {tenant_id: t-bravo, connected_account_id: "${K5_ACCT_BRAVO}", display_name: Bravo}
+  - {tenant_id: t-charlie, connected_account_id: "${K5_ACCT_CHARLIE}", display_name: Charlie}
+obligations:
+  - {obligation_id: ob-a1, tenant_id: t-alpha, amount_due: "500",
+     due_on: "${K5_DUE_ON}", expected_deposit_on: "${K5_EXPECTED_DEPOSIT_ON}"}
+monthly_fees: {t-alpha: "25"}
+late_repayments: {}

@@ -4,7 +4,17 @@
 # Variables:
 #   K5_ACCT_ALPHA, K5_ACCT_BRAVO, K5_ACCT_CHARLIE   acct_... of poc-i5-t-alpha / -t-bravo /
 #                                                   -t-charlie
-#   K5_DUE_ON, K5_EXPECTED_DEPOSIT_ON               YYYY-MM-DD for the demo obligation
+#   K5_DUE_ON, K5_EXPECTED_DEPOSIT_ON               YYYY-MM-DD for the demo obligation.
+#       K5_DUE_ON must be the UTC date of the day you run the bridge demo: a bridge is only
+#       for a payment due today, and on any other day register_shortfall and bridge_shortfall
+#       are BLOCKED ("payment is not due today"). K5_EXPECTED_DEPOSIT_ON is that date or up
+#       to max_bridge_days (7) later. To demo on a later day, re-seed with the new dates:
+#         uv run --all-packages awx-deploy --profile <profile> run k5 seed_platform_setup \
+#           kits/k5_platform_spend/examples/reseed_platform_setup.yaml \
+#           --var K5_ACCT_ALPHA=acct_... --var K5_ACCT_BRAVO=acct_... \
+#           --var K5_ACCT_CHARLIE=acct_... --var K5_DUE_ON=YYYY-MM-DD \
+#           --var K5_EXPECTED_DEPOSIT_ON=YYYY-MM-DD
+#       That file is this file's seed_platform_setup args with "replace": true.
 # Each tenants row must name the same account the setup seeds for that tenant.
 # Put the fund_capital amount into the platform wallet too, with a sandbox deposit under
 # `flock /tmp/awx-sandbox.lock`, so the wallet-room check and the books agree.

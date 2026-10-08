@@ -6,6 +6,9 @@ written the stack outputs to infra/cdk-outputs.json:
     ... scripts/deployed_security_checks.py --outputs path/to/cdk-outputs.json
 
 Prints one PASS/FAIL line per check and no secret, token or password.
+
+Signs in as the demo users `demo-platform-requester`, `demo-k6-operator` and
+`demo-k5-operator-approver` (docs/deployment.md, "Demo users").
 """
 
 from __future__ import annotations
@@ -92,7 +95,9 @@ def mcp(body: dict, bearer: str | None) -> tuple[int, dict | str]:
             text = resp.read().decode()
             code = resp.status
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode()[:300]
+        return e.code, e.read().decode(errors="replace")[:300]
+    except (urllib.error.URLError, TimeoutError, OSError) as e:  # no HTTP reply at all
+        return 0, f"no reply: {type(e).__name__}"
     if text.lstrip().startswith("event:") or "\ndata:" in text or text.startswith("data:"):
         datas = [ln[5:].strip() for ln in text.splitlines() if ln.startswith("data:")]
         text = datas[-1] if datas else text
@@ -115,20 +120,112 @@ def call(tool: str, args: dict, bearer: str | None, rid: int = 1):
 
 
 def tool_payload(resp) -> dict:
-    """The tool Lambda's JSON result inside an MCP tools/call response."""
+    """The tool Lambda's JSON result inside an MCP tools/call response, always a dict.
+
+    A reply of any other shape comes back as a dict that no check accepts (`_raw`,
+    `_jsonrpc_error`, `_text`, `_result`), so a malformed reply is a FAIL, never a crash.
+    """
     code, body = resp
     if not isinstance(body, dict):
         return {"_raw": body, "_status": code}
     if "error" in body:
         return {"_jsonrpc_error": body["error"]}
-    content = body.get("result", {}).get("content", [])
-    for c in content:
-        if c.get("type") == "text":
+    result = body.get("result")
+    content = result.get("content") if isinstance(result, dict) else None
+    for c in content if isinstance(content, list) else []:
+        if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str):
             try:
-                return json.loads(c["text"])
+                out = json.loads(c["text"])
             except ValueError:
                 return {"_text": c["text"][:300]}
-    return {"_result": body.get("result")}
+            return out if isinstance(out, dict) else {"_text": c["text"][:300]}
+    return {"_result": result}
+
+
+def error_of(out) -> dict:
+    """The tool's {"error": {...}} object, or {} when there is none or it is not an object."""
+    err = out.get("error") if isinstance(out, dict) else None
+    return err if isinstance(err, dict) else {}
+
+
+def identity_reached_tool(out) -> bool:
+    """Positive evidence for check 3 that the verified caller reached the kit 1 tool code.
+
+    A read answers with `untrusted_data` (data, or a stated refusal such as NOT_CONFIGURED
+    before kit 1 is seeded), and a read the reader could not complete answers READ_FAILED. The
+    tool returns either only after it has verified the caller's token. Any other reply,
+    including a malformed one, is a FAIL.
+    """
+    if not isinstance(out, dict) or "_jsonrpc_error" in out:
+        return False
+    if "untrusted_data" in out:
+        return "error" not in out
+    return error_of(out).get("code") == "READ_FAILED"
+
+
+MAX_TOOL_PAGES = 50  # paging that reaches this cap fails check 0 instead of hanging
+
+
+def list_all_tools(bearer: str | None) -> tuple[int, list[str], int, str | None]:
+    """Every tool name from the Gateway's paginated tools/list, following nextCursor.
+
+    Returns (HTTP status of the last page, names, pages read, problem). `problem` is None when
+    the last page had no nextCursor. Otherwise it says why the walk stopped early: a non-200
+    page, a reply that is not a JSON-RPC result object, a tool entry with no name, a repeated
+    cursor or the page cap. Check 0 fails on any problem.
+    """
+    names: list[str] = []
+    cursor: str | None = None
+    seen: set[str] = set()
+    code = 0
+    for page in range(1, MAX_TOOL_PAGES + 1):
+        body_in: dict = {"jsonrpc": "2.0", "id": 100 + page, "method": "tools/list"}
+        if cursor is not None:
+            body_in["params"] = {"cursor": cursor}
+        code, body = mcp(body_in, bearer)
+        if code != 200:
+            return code, names, page, f"HTTP {code} on page {page}"
+        result = body.get("result") if isinstance(body, dict) else None
+        tools = result.get("tools", []) if isinstance(result, dict) else None
+        if not isinstance(tools, list):
+            return code, names, page, f"page {page} is not a tools/list result"
+        for t in tools:
+            name = t.get("name") if isinstance(t, dict) else None
+            if not isinstance(name, str) or not name:
+                return code, names, page, f"page {page} has a tool entry with no name"
+            names.append(name)
+        cursor = result.get("nextCursor")
+        if not cursor:
+            return code, names, page, None
+        if cursor in seen:
+            return code, names, page, f"page {page} repeats an earlier cursor"
+        seen.add(cursor)
+    return code, names, MAX_TOOL_PAGES, f"still paging after {MAX_TOOL_PAGES} pages"
+
+
+# The tool plane's own refusal of a kit 1-4 caller that is not the platform
+# (awx_agent.identity.CallerIdentity.run_tenant).
+PLATFORM_ONLY_REFUSAL = "serves platform callers only"
+
+
+def refused_by_tenant_check(out) -> bool:
+    """A cross-tenant tool call passes only when the tool plane's tenant check refused it.
+
+    That check runs before the tool reads its arguments or any kit state, and its refusal is
+    TENANT_SCOPE with a message containing PLATFORM_ONLY_REFUSAL. Any other outcome means the
+    caller got past it or it never ran, and counts as a FAIL whether or not the kit was seeded:
+    data, NOT_CONFIGURED, INVALID_INPUT, a JSON-RPC error, a malformed reply, or a TENANT_SCOPE
+    raised later (by the reader, for example).
+    """
+    if not isinstance(out, dict) or "untrusted_data" in out:
+        return False
+    err = error_of(out)
+    message = err.get("message")
+    return (
+        err.get("code") == "TENANT_SCOPE"
+        and isinstance(message, str)
+        and PLATFORM_ONLY_REFUSAL in message
+    )
 
 
 def stack_resource(stack: str, prefix: str, rtype: str) -> str:
@@ -148,6 +245,17 @@ def forge(tok: str) -> str:
 
 
 def main() -> int:
+    """Run every check and print the summary line, even when a reply breaks a check."""
+    try:
+        run_checks()
+    except Exception as e:  # a malformed reply or a failed AWS call: FAIL, and still summarise
+        check("run stopped early", False, f"{type(e).__name__}; later checks did not run")
+    failed = [n for n, ok, _ in results if not ok]
+    print(f"{len(results) - len(failed)}/{len(results)} passed")
+    return 1 if failed else 0
+
+
+def run_checks() -> None:
     req_tok = token("demo-platform-requester")
     k6_tok = token("demo-k6-operator")
     k1_fn = stack_resource("AwxAgentStack", "K1ToolsHandler", "AWS::Lambda::Function")
@@ -156,17 +264,13 @@ def main() -> int:
     code, body = mcp({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, None)
     check("1 unauthenticated tools/list refused", code in (401, 403), f"HTTP {code}")
 
-    # tools/list with a token: tools carry the kit prefix.
-    code, body = mcp({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, req_tok)
-    names = (
-        [t["name"] for t in body.get("result", {}).get("tools", [])]
-        if isinstance(body, dict)
-        else []
-    )
+    # tools/list with a token, every page: tools carry the kit prefix.
+    code, names, pages, problem = list_all_tools(req_tok)
     check(
         "0 authenticated tools/list",
-        code == 200 and any(n.startswith("k1___") for n in names),
-        f"HTTP {code}, {len(names)} tools",
+        code == 200 and problem is None and any(n.startswith("k1___") for n in names),
+        f"HTTP {code}, {len(names)} tools across {pages} pages"
+        + (f", {problem}" if problem else ""),
     )
 
     # 2. Bad signature (Gateway behaviour A: authorizer and/or interceptor reject; tool Lambda
@@ -177,7 +281,7 @@ def main() -> int:
     refused = (
         code in (401, 403)
         or "_jsonrpc_error" in out
-        or (out.get("error", {}).get("code") == "NOT_AUTHORISED")
+        or (error_of(out).get("code") == "NOT_AUTHORISED")
     )
     check("2 forged-signature token refused", refused, f"HTTP {code}")
     t1 = int(time.time() * 1000)
@@ -186,13 +290,10 @@ def main() -> int:
     # 3. Identity reaches the Lambda (Gateway behaviour B: _awx_caller passes through).
     code, body = call("k1___read_balances", {}, req_tok, rid=3)
     out = tool_payload((code, body))
-    err = out.get("error", {})
-    no_caller = (
-        "caller" in str(err.get("message", "")).lower() and err.get("code") == "NOT_AUTHORISED"
-    )
+    err = error_of(out)
     check(
         "3 identity reaches the tool Lambda (_awx_caller passed through)",
-        code == 200 and not no_caller and "_jsonrpc_error" not in out,
+        code == 200 and identity_reached_tool(out),
         f"HTTP {code}, result keys {sorted(out)[:5]}, error {err.get('code')}",
     )
 
@@ -205,31 +306,53 @@ def main() -> int:
             ClientContext=ctx.decode(),
             Payload=json.dumps({"_awx_caller": caller}).encode(),
         )
-        return json.loads(r["Payload"].read() or b"{}")
+        try:
+            out = json.loads(r["Payload"].read() or b"{}")
+        except ValueError:
+            return {"_raw": "unparseable Lambda payload"}
+        return out if isinstance(out, dict) else {"_raw": out}
 
     out = direct(k1_fn, "k2___read_card_controls", req_tok)
     check(
         "4 another kit's tool refused by the kit 1 tool Lambda",
         "error" in out and "untrusted_data" not in out,
-        f"error {out.get('error', {}).get('code')}",
+        f"error {error_of(out).get('code')}",
     )
 
     # 3b. Direct invoke with a forged caller is useless.
     out = direct(k1_fn, "k1___read_balances", forge(req_tok))
     check(
         "3b direct invoke with a forged _awx_caller refused",
-        out.get("error", {}).get("code") == "NOT_AUTHORISED",
-        f"error {out.get('error', {}).get('code')}",
+        error_of(out).get("code") == "NOT_AUTHORISED",
+        f"error {error_of(out).get('code')}",
     )
 
-    # 5. Cross-tenant: a k6 operator cannot use kit 1 (platform tenant) data.
+    # 5. Cross-tenant: kits 1-4 serve platform callers only. A k6 operator (a tenant with a
+    # row in another kit) is refused by the tenant check, whether or not kit 1 is seeded.
     code, body = call("k1___read_balances", {}, k6_tok, rid=5)
     out = tool_payload((code, body))
     check(
         "5 k6:operator caller cannot read kit 1 (platform) data",
-        "untrusted_data" not in out and ("error" in out or "_jsonrpc_error" in out),
-        f"HTTP {code}, error {out.get('error', {}).get('code')}",
+        refused_by_tenant_check(out),
+        f"HTTP {code}, error {error_of(out).get('code')}",
     )
+    # 5c. A tenant with no tenants-table row (k5:operator) is refused too, never the platform.
+    try:
+        k5_op_tok = token("demo-k5-operator-approver")
+    except Exception as e:  # no such demo user: the check could not run, so it does not pass
+        check(
+            "5c k5:operator caller (no tenants row) cannot read kit 1 (platform) data",
+            False,
+            f"cannot sign in as demo-k5-operator-approver: {type(e).__name__}",
+        )
+    else:
+        code, body = call("k1___read_balances", {}, k5_op_tok, rid=6)
+        out = tool_payload((code, body))
+        check(
+            "5c k5:operator caller (no tenants row) cannot read kit 1 (platform) data",
+            refused_by_tenant_check(out),
+            f"HTTP {code}, error {error_of(out).get('code')}",
+        )
     # 5b. Approval API: the k6 operator sees no platform proposals.
     api = OUT["AwxSpine"]["ApprovalApiUrl"].rstrip("/") + "/proposals"
     req = urllib.request.Request(  # noqa: S310
@@ -238,11 +361,16 @@ def main() -> int:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
             items = json.loads(resp.read().decode())
-        rows = items.get("proposals", items if isinstance(items, list) else [])
+        if isinstance(items, dict):
+            rows = items.get("proposals")
+        else:
+            rows = items
+        if not isinstance(rows, list):
+            raise ValueError("not a proposals list")
         leaked = [
             p
             for p in rows
-            if isinstance(p, dict) and p.get("tenant_id") not in (None, "k6:operator")
+            if not isinstance(p, dict) or p.get("tenant_id") not in (None, "k6:operator")
         ]
         check("5b approval API lists no other tenant's proposals", not leaked, f"{len(rows)} rows")
     except urllib.error.HTTPError as e:
@@ -250,6 +378,12 @@ def main() -> int:
             "5b approval API lists no other tenant's proposals",
             e.code in (401, 403, 404),
             f"HTTP {e.code}",
+        )
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        check(
+            "5b approval API lists no other tenant's proposals",
+            False,
+            f"no usable reply: {type(e).__name__}",
         )
 
     # 6. The reader refuses a kit named in the payload.
@@ -317,10 +451,6 @@ def main() -> int:
             False,
             f"log read failed: {type(e).__name__}",
         )
-
-    failed = [n for n, ok, _ in results if not ok]
-    print(f"{len(results) - len(failed)}/{len(results)} passed")
-    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -123,6 +123,14 @@ def validate_reconcile(raw: Mapping[str, Any]) -> Mapping[str, Any]:
     return {}
 
 
+# Said in every disbursement result, so the agent does not invent a reason for the amount: a
+# borrower who asks for a figure gets the tranche code sized, whatever the figure was.
+AMOUNT_NOT_CHOSEN = (
+    "the borrower cannot choose the amount: code sizes each tranche from the loan's remaining "
+    "commitment and the platform's lending capacity, whatever amount was asked for"
+)
+
+
 def _blocked(*reasons: str, computed: Mapping[str, Any] | None = None) -> PolicyDecision:
     return PolicyDecision(RiskTier.BLOCKED, tuple(reasons), dict(computed or {}))
 
@@ -537,7 +545,11 @@ def build_specs() -> dict[str, KitWorkflowSpec]:
             tier = RiskTier.DUAL if pending.amount > cfg.dual_approval_above else RiskTier.SINGLE
             return PolicyDecision(
                 tier,
-                (f"re-send the in-flight tranche {pending.tranche} of {pending.amount} unchanged",),
+                (
+                    f"re-send the in-flight tranche {pending.tranche} of {pending.amount} "
+                    "unchanged",
+                    AMOUNT_NOT_CHOSEN,
+                ),
                 {
                     "amount": pending.amount,
                     "fee": terms.fee_for(pending.amount),
@@ -569,6 +581,7 @@ def build_specs() -> dict[str, KitWorkflowSpec]:
         if plan.outcome is TrancheOutcome.DELAY:
             return _blocked(
                 "delayed: not enough headroom above the reserve floor for the minimum tranche",
+                AMOUNT_NOT_CHOSEN,
                 computed=computed,
             )
         why = {
@@ -578,6 +591,7 @@ def build_specs() -> dict[str, KitWorkflowSpec]:
         reasons = [
             f"{plan.outcome.value.lower()} tranche {plan.amount} of the remaining commitment "
             f"{plan.commitment_remaining}: {why}",
+            AMOUNT_NOT_CHOSEN,
             "every disbursement needs a human approver",
         ]
         tier = RiskTier.SINGLE

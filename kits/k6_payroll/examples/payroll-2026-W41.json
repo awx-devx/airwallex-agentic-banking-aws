@@ -1,0 +1,74 @@
+{
+  "pay_period": "2026-W41",
+  "employers": [
+    {
+      "employer": "a",
+      "funding_currency": "USD",
+      "contractors": [
+        {
+          "contractor": "alice",
+          "first_name": "Sam",
+          "last_name": "Example",
+          "amount": {"amount": "25.00", "currency": "USD"},
+          "transfer_method": "LOCAL",
+          "address": {
+            "street_address": "1 Test St",
+            "city": "Austin",
+            "state": "US-TX",
+            "postcode": "78701",
+            "country_code": "US"
+          },
+          "bank": {
+            "account_name": "Sam Example",
+            "account_number": "000123456789",
+            "routing_number": "021000021",
+            "category": "Checking"
+          }
+        },
+        {
+          "contractor": "anna",
+          "first_name": "Eva",
+          "last_name": "Muster",
+          "amount": {"amount": "100.00", "currency": "EUR"},
+          "transfer_method": "SWIFT",
+          "address": {
+            "street_address": "Teststrasse 1",
+            "city": "Berlin",
+            "postcode": "10115",
+            "country_code": "DE"
+          },
+          "bank": {
+            "account_name": "Eva Muster",
+            "iban": "DE89370400440532013000",
+            "swift_code": "COBADEFFXXX"
+          }
+        }
+      ]
+    },
+    {
+      "employer": "c",
+      "funding_currency": "USD",
+      "contractors": [
+        {
+          "contractor": "cleo",
+          "first_name": "Ali",
+          "last_name": "Sample",
+          "amount": {"amount": "20.00", "currency": "GBP"},
+          "transfer_method": "LOCAL",
+          "address": {
+            "street_address": "1 Test Road",
+            "city": "London",
+            "postcode": "EC1A 1BB",
+            "country_code": "GB"
+          },
+          "bank": {
+            "account_name": "Ali Sample",
+            "account_number": "12345678",
+            "sort_code": "040004",
+            "bank_name": "Example Bank"
+          }
+        }
+      ]
+    }
+  ]
+}

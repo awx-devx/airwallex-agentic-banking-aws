@@ -14,7 +14,8 @@ The diagram source is `docs/architecture/k3_incident.drawio`.
 
 ## Flow
 1. An operator stages the supplier payment that will fail (`send_supplier_transfer`, run
-   locally through `awx_spine_aws.local_runner` with `Origin.OPERATOR`). Its reference carries
+   locally by `scripts/stage_original_transfer.py` through `awx_spine_aws.local_runner` with
+   `Origin.OPERATOR`). Its reference carries
    a `-nosettle` marker, so the sandbox driver leaves it in flight at SENT. This is not an agent
    tool and is not deployed.
 2. A person tells the agent the supplier has not been paid. The agent calls
@@ -22,7 +23,10 @@ The diagram source is `docs/architecture/k3_incident.drawio`.
    WAIT and a replacement proposal is BLOCKED.
 3. In the sandbox the agent can propose `propose_simulate_transfer_failure`; once approved, the
    state machine `awx-k3-simulate_transfer_failure` moves the transfer to SENT, then FAILED with
-   the chosen failure type. Airwallex reads it back as CANCELLED with a `failure` block.
+   the chosen failure type. Airwallex reads it back as CANCELLED with a `failure` block. The
+   sandbox records the failure type of a simulated bank return as `INCORRECT_ROUTING`, though
+   the kit asks for `BENEFICIARY_BANK_RETURNED`; the failure code is 90802 either way, and the
+   kit decides on the code.
 4. The assessment now returns REPLACE only if the failure code is 90802
    (BENEFICIARY_BANK_RETURNED). The agent proposes `propose_replace_failed_transfer`, naming
    only the original transfer id and an incident reference.
@@ -36,6 +40,9 @@ The diagram source is `docs/architecture/k3_incident.drawio`.
    REPLACEMENT_FAILED) and writes the closure record: the original's failure and the
    replacement's outcome. If the replacement settles later, `propose_close_incident`
    (`awx-k3-close_incident`) records the closure.
+8. Once the replacement is PAID, the assessment of the original reads ESCALATE with
+   "duplicate lock held". That is the expected end state: the original has had its one
+   replacement, so a second one is refused.
 
 ## Model and code responsibilities
 The model summarises the supplier's message, reads the assessment, recommends an action and
@@ -132,12 +139,33 @@ and removes every other kit's tools. See [infra/README.md](../../infra/README.md
 
 Kit 3 needs no tenants-table rows, no operator commands and no `deploy/k3.yaml`: it runs as the
 platform tenant. The sandbox platform account needs USD available for the staged payment and
-its replacement (1.00 USD each in the live runs). Before a demo, an operator stages the original
-locally: `STAGING_SPECS["send_supplier_transfer"]` through `run_kit_workflow` with
-`Origin.OPERATOR`, holding `flock /tmp/awx-sandbox.lock`, to a `poc-i3-` beneficiary with
-`stage_for_incident: true`. The deployed tools then need none of the operator's local records:
-they read the original from Airwallex by its id, and the replacement's request_id is keyed on
-that id. See [docs/deployment.md](../../docs/deployment.md).
+its replacement (1.00 USD each in the live runs).
+
+Before a demo, an operator stages the original locally with the sandbox key in
+`~/.config/airwallex-sandbox/credentials.env`:
+
+```
+uv run --all-packages python kits/k3_incident/scripts/stage_original_transfer.py
+```
+
+The script runs `STAGING_SPECS["send_supplier_transfer"]` through
+`awx_spine_aws.local_runner.run_kit_workflow` with `Origin.OPERATOR` (`Origin` lives in
+`awx_common.approvals`) and `stage_for_incident: true`, holding `flock /tmp/awx-sandbox.lock`.
+Staging is SINGLE, so the script shows the proposal (payee name, bank, account last 4, amount
+and fee) and asks the operator to type `yes`; it records that approval under a second identity.
+Any answer but `yes` rejects it and nothing is sent. Options:
+`--beneficiary-id` (default: the `poc-i3-supplier` beneficiary, which the kit 3 live test
+creates), `--amount` (USD, default 1.00, at most 10.00), `--payment-key` and `--yes` (approve
+without asking). It prints the transfer id; tell the agent the supplier has not been paid for
+that transfer. A re-run is not idempotent, even with the same `--payment-key`: each run mints a
+new book and the request_id carries the book, so the same key sends a new transfer. Before the
+send the script prints the payment key and the transfer's reference (`poc-i3-<payment key>`
+ending `-nosettle`), so after a crash find the transfer by that reference in the sandbox before
+running the script again. `tests/test_stage_script.py` runs the script against FakeAirwallex.
+
+The deployed tools then need none of the operator's local records: they read the original from
+Airwallex by its id, and the replacement's request_id is keyed on that id. See
+[docs/deployment.md](../../docs/deployment.md).
 
 ## Tests
 
@@ -152,7 +180,8 @@ one clock, one operation store and one kit store shared across runs (`tests/k3_f
 | `test_rule0.py` | every build run twice per proposal leaves one send and no stranded lock |
 | `test_contract.py` | exports, validation, the closure record, agent floors, reconcile hooks, lock ownership |
 | `test_tool_surface.py` | every tool through the real ToolDispatcher: approval binding, tenant isolation, server-owned fields, re-proposals |
-| `test_acceptance_live.py` | the live sandbox run, plus fake-only proofs of its cleanup and run record |
+| `test_acceptance_live.py` | the live sandbox run, plus fake-only proofs of its cleanup, its `NEEDS_PERSON` guidance and run record |
+| `test_stage_script.py` | `scripts/stage_original_transfer.py` against the fake: approval, refusal without one, beneficiary lookup, staging guardrails |
 | `test_synth.py` | marker `synth`: the synthesised `AwxKitK3` and kit 3's Gateway target |
 
 The live test is marker `sandbox` and runs only with `AWX_K3_LIVE=1`:
@@ -163,8 +192,16 @@ AWX_K3_LIVE=1 uv run --all-packages pytest kits/k3_incident/tests/test_acceptanc
 
 It holds `flock /tmp/awx-sandbox.lock` for the whole run, uses a fresh kit store, reuses (or
 creates once) the `poc-i3-supplier` beneficiary, stages 1.00 USD, simulates a bank return and
-pays one 1.00 USD replacement. Its cleanup always leaves nothing at SENT, and it writes a run
-record to `$AWX_K3_SHAPES` when set. See [docs/testing.md](../../docs/testing.md).
+pays one 1.00 USD replacement. Cleanup runs whatever the outcome: an original still in flight
+goes through the kit's failure simulation (a bank return refunds it) and a replacement still in
+flight is driven to PAID. Cleanup does not always leave nothing at SENT: a sandbox simulation
+can answer with an unknown outcome, and cleanup never retries one, because simulations are not
+idempotent. On 8 Oct 2026 the failure simulation answered `OUTCOME_UNKNOWN`, the original stayed
+SENT and the sandbox later settled it to PAID, not refunded. When cleanup cannot finish (an
+original or replacement still in flight, or an original that ended PAID), the test prints
+`NEEDS_PERSON` guidance naming each transfer id and what to check in the sandbox, and fails if
+anything is still in flight. It writes a run record, including that guidance, to
+`$AWX_K3_SHAPES` when set. See [docs/testing.md](../../docs/testing.md).
 
 ## Validation
 
@@ -176,6 +213,20 @@ record to `$AWX_K3_SHAPES` when set. See [docs/testing.md](../../docs/testing.md
   operator staged a 1.00 USD original locally; the agent proposed the failure simulation
   (approved, CANCELLED with 90802), read REPLACE from the assessment, proposed the replacement
   (approved) and it reached PAID. Nothing was left in flight.
+- A deployment from a fresh clone into a new account, 8 Oct 2026. The original 1.00 USD
+  transfer was staged locally with an approval decision (the command above). Through the
+  deployed agent the assessment was WAIT while it was PROCESSING; the simulated failure was
+  proposed (SINGLE) and approved, and the transfer read back CANCELLED with failure code 90802;
+  the replacement was proposed (SINGLE) and approved and reached PAID for 1.00 USD; a second
+  replacement request was refused (ESCALATE, duplicate lock held). The sandbox reported the
+  failure type as INCORRECT_ROUTING, not BENEFICIARY_BANK_RETURNED; the code 90802 matched, so
+  the kit accepted it. The same day the live test failed once (see the live test above) and
+  passed on its second run.
+- The same deployment after the fixes in this repository, 8 Oct 2026. The staging script
+  (the command above) staged the original. Through the deployed agent, the assessment read the
+  original as still in flight, then the failure simulation and the replacement each ran after
+  its approval. The flow ended with the original CANCELLED with failure code 90802 and the
+  1.00 USD replacement PAID.
 
 Not validated live: the cleanup paths (proved on the fake only), SWIFT fees, attempts after a
 refusal, resumes, joins and the 6-day margin, and `propose_close_incident` as a separate step.

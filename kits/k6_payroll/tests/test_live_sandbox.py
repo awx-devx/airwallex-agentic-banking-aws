@@ -7,6 +7,10 @@ one exists); AUTO rate lock; the approved payroll; when a's first payout is crea
 lands in c (the mid-run deposit). Expect a and c SUCCEEDED, b BLOCKED with nothing sent for b
 and b's balance unchanged, and every transfer, conversion and charge this run sent terminal.
 
+The run never drains b, so b's balance only grows across runs. When b already holds more than
+its payroll less 0.01, the run grows b's USD LOCAL payout instead (size_short_employer) so b is
+0.01 USD short at its current balance; the test can run again on the same sandbox.
+
 Runs live only with AWX_K6_LIVE=1, and then needs AWX_K6_ACCOUNTS: the path of the owner-only
 connected-accounts file (K6_EMPLOYER_A_ACCT, _B_, _C_). It NEVER creates a connected account:
 a missing or non-ACTIVE account stops the run. Every sandbox call runs under
@@ -18,13 +22,14 @@ PayrollFake.
 
 from __future__ import annotations
 
+import copy
 import fcntl
 import json
 import os
 import time
 import uuid
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_UP, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +61,11 @@ MONEY_OPS = {"fx.conversions.create", "transfers.create", "charges.create", "ben
 IN_FLIGHT = {"SCHEDULED", "PROCESSING", "SENT", "PENDING"}
 TARGET = {"a": Decimal("20000"), "c": Decimal("5000")}
 MID_RUN = Decimal("1000.00")
+CENT = Decimal("0.01")
+# The most size_short_employer grows b's payroll by. Above it a stray deposit has left b far
+# over its payroll, and growing further would turn the test into a large (past 10,000 USD,
+# DUAL) blocked payroll, so the run stops for a person instead.
+MAX_GROWTH = Decimal("1000.00")
 
 log: list[dict[str, Any]] = []
 
@@ -237,7 +247,56 @@ class Run:
         )
 
 
-def acceptance() -> tuple[str, list[str]]:
+def price_b(r: Run, port: Port, accts: dict[str, str], employer_b: dict[str, Any]) -> Decimal:
+    """What b's payroll needs in USD (payouts, FX sells at the stored locks, platform fee),
+    from a payroll proposal that is never approved, so it prices and sends nothing for b."""
+    probe = r(PAYROLL_SPEC, {"pay_period": PERIOD, "employers": [employer_b]}, approvers=())
+    if probe.state != "EXPIRED" or any(
+        o.on_behalf_of == accts["b"] and o.name in MONEY_OPS for o, _ in port.sent
+    ):
+        raise SystemExit("STOP: the pricing probe did more than price")
+    ch = probe.proposal.computed["children"][0]
+    sells = sum((v["sell"] for v in ch["fx_lock"].values()), Money.zero("USD"))
+    need = sells + ch["pricing"]["by_currency"]["USD"]["need"] + ch["pricing"]["platform_fee"]
+    return need.amount
+
+
+def size_short_employer(
+    employer_b: dict[str, Any], need: Decimal, held: Decimal
+) -> tuple[dict[str, Any] | None, Decimal]:
+    """Size b's payroll so b ends exactly 0.01 USD short, without taking money out of b.
+
+    Returns (resized employer or None, the USD balance b must hold). While b holds less than
+    need - 0.01, the payroll stays as it is and the run tops b up to need - 0.01. Once b holds
+    more (an earlier run, or any other deposit, left it there), the first USD LOCAL payout
+    grows by the difference, which raises b's need by exactly that amount (a LOCAL USD payout
+    has no FX and no SWIFT fee, and the platform fee is per contractor), so b's current balance
+    is already 0.01 short and nothing is deposited into b. Growth above MAX_GROWTH stops the
+    run with nothing sent.
+    """
+    if held <= need - CENT:
+        return None, need - CENT
+    grow = (held + CENT - need).quantize(CENT, rounding=ROUND_UP)
+    if grow > MAX_GROWTH:
+        raise SystemExit(
+            f"STOP: poc-i6-b holds {held} USD, {grow} USD more than its payroll needs to be "
+            f"0.01 short; the test grows b's payroll by at most {MAX_GROWTH} USD. Move the excess "
+            "out of poc-i6-b by hand, or point AWX_K6_ACCOUNTS at another employer b"
+        )
+    sized = copy.deepcopy(employer_b)
+    for line in sized["contractors"]:
+        if line["amount"]["currency"] == "USD" and line["transfer_method"] == "LOCAL":
+            line["amount"]["amount"] = str(Decimal(str(line["amount"]["amount"])) + grow)
+            return sized, need + grow - CENT
+    raise SystemExit("STOP: b's payroll has no USD LOCAL payout to size against b's balance")
+
+
+def acceptance(
+    fake_opening: dict[str, str] | None = None, lock_path: str = LOCK
+) -> tuple[str, list[str]]:
+    """The acceptance run. `fake_opening` (fake only) sets employers' opening USD balances;
+    `lock_path` is the sandbox lock file (an offline run passes its own, so it never waits on
+    a live run's /tmp/awx-sandbox.lock)."""
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     t0 = time.time()
     outcome = "FAIL"
@@ -252,10 +311,10 @@ def acceptance() -> tuple[str, list[str]]:
 
         fake = PayrollFake()
         port = Port(fake)
-        accts = {c: fake.employer(c, "0") for c in "abc"}
-    fh = open(LOCK, "a")
+        accts = {c: fake.employer(c, (fake_opening or {}).get(c, "0")) for c in "abc"}
+    fh = open(lock_path, "a")
     fcntl.flock(fh, fcntl.LOCK_EX)
-    note(step="lock", held=True, live=LIVE, run_id=run_id)
+    note(step="lock", held=True, live=LIVE, run_id=run_id, path=lock_path)
     try:
         for code, acct in accts.items():
             check_active(port, code, acct)
@@ -268,32 +327,29 @@ def acceptance() -> tuple[str, list[str]]:
         note(step="lock_rates", state=lock.state, detail=lock.detail)
         if lock.state != "SUCCEEDED":
             raise SystemExit("STOP: rate lock did not succeed")
-        probe = r(
-            PAYROLL_SPEC,
-            {"pay_period": PERIOD, "employers": [batch()["employers"][1]]},
-            approvers=(),
-        )
-        ch = probe.proposal.computed["children"][0]
-        sells = sum((v["sell"] for v in ch["fx_lock"].values()), Money.zero("USD"))
-        need_b = sells + ch["pricing"]["by_currency"]["USD"]["need"] + ch["pricing"]["platform_fee"]
-        short = need_b.amount - Decimal("0.01")
-        note(step="need_b", state=probe.state, need=str(need_b.amount), short=str(short))
-        if probe.state != "EXPIRED" or any(
-            o.on_behalf_of == accts["b"] and o.name in MONEY_OPS for o, _ in port.sent
-        ):
-            raise SystemExit("STOP: the pricing probe did more than price")
+        payroll = batch()
+        need_b = price_b(r, port, accts, payroll["employers"][1])
+        sized, b_balance = size_short_employer(payroll["employers"][1], need_b, before["b"])
+        note(step="need_b", need=str(need_b), b_balance=str(b_balance), resized=sized is not None)
+        if sized is not None:
+            # b already holds more than its payroll: grow b's payroll instead of draining b.
+            payroll["employers"][1] = sized
+            if price_b(r, port, accts, sized) - CENT != b_balance:
+                raise SystemExit("STOP: b's resized payroll does not price 0.01 USD above b")
 
-        targets = {**TARGET, "b": short}
+        targets = {**TARGET, "b": b_balance}
         for code in "abc":
             gap = targets[code] - before[code]
             if code == "b" and gap < 0:
-                raise SystemExit(f"STOP: poc-i6-b already holds {before['b']} USD, above {short}")
+                raise SystemExit(
+                    f"STOP: poc-i6-b already holds {before['b']} USD, above {b_balance}"
+                )
             if gap > 0:
                 deposit(port, code, accts[code], gas[code], gap)
         funded = {c: usd_available(port, a) for c, a in accts.items()}
         note(step="balances_funded", **{c: str(v) for c, v in funded.items()})
-        if funded["b"] != short:
-            raise SystemExit(f"STOP: poc-i6-b reads {funded['b']}, not {short}")
+        if funded["b"] != b_balance:
+            raise SystemExit(f"STOP: poc-i6-b reads {funded['b']}, not {b_balance}")
 
         fired: list[bool] = []
 
@@ -304,7 +360,7 @@ def acceptance() -> tuple[str, list[str]]:
 
         port.after_write["transfers.create"] = mid_run
         sent_before = len(port.sent)
-        out = r(PAYROLL_SPEC, batch())
+        out = r(PAYROLL_SPEC, payroll)
         kids = {c.proposal.intent["employer"]: c for c in out.child_outcomes}
         states = {k: kids[k].state for k in "abc" if k in kids}
         note(
@@ -330,8 +386,8 @@ def acceptance() -> tuple[str, list[str]]:
             problems.append(f"money ops for b: {b_money}")
         after = {c: usd_available(port, a) for c, a in accts.items()}
         note(step="balances_after", **{c: str(v) for c, v in after.items()})
-        if after["b"] != short:
-            problems.append(f"b balance moved: {after['b']} != {short}")
+        if after["b"] != b_balance:
+            problems.append(f"b balance moved: {after['b']} != {b_balance}")
         if not fired:
             problems.append("mid-run deposit into c never fired")
         convs = [o for o, _ in ops if o.name == "fx.conversions.create"]

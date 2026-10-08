@@ -57,7 +57,7 @@ def test_acceptance_contradiction_changes_tier_plan_stays_above_floor_and_replay
     assert supported.risk_tier is RiskTier.AUTO
     assert contradicted.risk_tier is RiskTier.SINGLE
     (conv,) = contradicted.computed["conversions"]
-    assert conv["buy"] == eur("6031.91")  # 7525.70 + 6.21 SWIFT fee - 1500 headroom
+    assert conv["buy"] == eur("6038.55")  # 7525.70 + 12.85 SWIFT fee - 1500 headroom
     assert conv["sell"] == read_ratelock(env.store, "EUR")["sell"]  # exact, from the lock
 
     seen_sell = []
@@ -70,7 +70,8 @@ def test_acceptance_contradiction_changes_tier_plan_stays_above_floor_and_replay
         contradicted_raw, approvers=["approver"], during_approval=approve_while_the_rate_moves
     )
     assert first.state == "SUCCEEDED", (first.detail, first.postcondition)
-    assert env.money("EUR") == eur("500.00")
+    # Sized at 12.85; the fake charges 6.21, so the wallet ends 6.64 above its floor.
+    assert env.money("EUR") == eur("506.64")
     assert env.money("USD") >= usd("20000")
     assert len(env.conversions()) == 1
     assert seen_sell == [conv["sell"]]  # the approver saw the exact sell (M3)

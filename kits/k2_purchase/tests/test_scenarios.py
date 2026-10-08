@@ -1194,3 +1194,26 @@ def test_select_never_returns_another_objects_row():
     assert _probe_listed(ProbeKind.AT_LIMIT).select({"items": [row, own]}, probe) == own
     other_card = {"card_id": "c2", "card_transaction_data": {"card_transaction_id": "X"}}
     assert _probe_listed(ProbeKind.AT_LIMIT).select({"items": [other_card]}, probe) is None
+
+
+def test_recovering_from_a_probe_left_in_flight_closes_that_card_and_uses_a_new_one():
+    """The README's procedure for a probe left in flight, in the 8 Oct 2026 shape (the first
+    simulated authorisation answered 500): the stuck card's limit tests stay BLOCKED; its
+    transactions show whether the probe landed; closing it is not blocked; a new limit-test
+    card under a new purchase_ref runs the whole test."""
+    env = K2Env()
+    stuck = env.limit_test_card()
+    env.fake.inject(SIM, Fault.SERVER_ERROR)
+    out = env.run("run_limit_test", {"card_id": stuck}, "approver")
+    assert out.state == "FAILED"
+    assert "probe_currency in flight on request_id" in out.postcondition.detail
+    assert env.run("run_limit_test", {"card_id": stuck}, "approver").state == "BLOCKED"
+    rows = READS["read_card_transactions"]({"card_id": stuck}, env.ctx())["transactions"]
+    assert rows == []  # this 500 did not apply: no authorisation, nothing debited
+    assert env.run("close_card", {"card_id": stuck}, "approver").state == "SUCCEEDED"
+    assert env.status(stuck) == "CLOSED"
+    fresh = env.issue("limit-test-crm-2")[1]
+    found = READS["read_card_controls"]({"purchase_ref": "limit-test-crm-2"}, env.ctx())
+    assert found["card_id"] == fresh
+    passed = env.run("run_limit_test", {"card_id": fresh}, "approver")
+    assert passed.state == "SUCCEEDED", (passed.detail, passed.postcondition)

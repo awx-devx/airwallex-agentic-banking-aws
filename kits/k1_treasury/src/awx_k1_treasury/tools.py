@@ -35,7 +35,8 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "read_obligations",
         ToolKind.READ,
-        "Obligations due in the next 72 hours and the expected receipts, from the treasury book.",
+        "Every obligation in the treasury book with its due time and due_window (OVERDUE, "
+        "NEXT_72_HOURS or LATER, from as_of), and the expected receipts.",
         _EMPTY,
     ),
     ToolSpec(

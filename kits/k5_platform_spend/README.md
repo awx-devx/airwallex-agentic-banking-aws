@@ -153,6 +153,31 @@ proposal is BLOCKED; nothing reaches Airwallex.
 
    `apply` writes the tenants rows (kit `k5`, role `customer`) and runs the operator commands
    `seed_platform_setup` and `fund_capital`.
+
+   Set `K5_DUE_ON` to the UTC (Coordinated Universal Time) date of the day you run the bridge demo, and
+   `K5_EXPECTED_DEPOSIT_ON` to that date or up to 7 days (`max_bridge_days`) later. A bridge is
+   only for a payment due today: on any other day `propose_register_shortfall` and
+   `propose_bridge_shortfall` are BLOCKED with "payment is not due today". To run the demo on a
+   later day, re-seed with the new dates. The args file
+   [examples/reseed_platform_setup.yaml](examples/reseed_platform_setup.yaml) is the deploy
+   file's `seed_platform_setup` args with `"replace": true`:
+
+   ```
+   uv run --all-packages awx-deploy --profile <profile> run k5 seed_platform_setup \
+     kits/k5_platform_spend/examples/reseed_platform_setup.yaml \
+     --var K5_ACCT_ALPHA=acct_... --var K5_ACCT_BRAVO=acct_... --var K5_ACCT_CHARLIE=acct_... \
+     --var K5_DUE_ON=YYYY-MM-DD --var K5_EXPECTED_DEPOSIT_ON=YYYY-MM-DD
+   ```
+
+   The replace keeps the capital ledger and its book id. `awx-deploy` refuses it while any kit 5
+   execution is RUNNING, and kit 5 refuses it while it would orphan money held or owed
+   ([DESIGN.md](DESIGN.md#operator-commands)). An obligation that has been bridged is not
+   bridged again, and a tenant holds one open advance at a time, so a re-seed moves dates but
+   doesn't make a bridged obligation bridgeable again. To run the demo a second time on one
+   deployment, add an obligation to the args file for another tenant, for example `t-bravo`,
+   that has no open advance and whose wallet holds less than the amount due, and sign in as that
+   tenant's requester (`demo-k5-bravo-requester` in
+   [docs/deployment.md](../../docs/deployment.md)).
 3. Deposit the funded capital into the platform wallet with a sandbox deposit, under
    `flock /tmp/awx-sandbox.lock`, so the wallet-room check and the ledger agree.
 4. Create demo users: a requester and an approver per customer tenant, and an approver with
@@ -196,8 +221,13 @@ real runner (`awx_spine_aws.local_runner`) against `FakeAirwallex`:
   pending. The replay check was not run live.
 - Deployed agent, 7 October 2026: asked as the platform login (no kit 5 customer login
   exists), kit 5 refused ("kit k5 needs a tenant_id claim") and the agent reported the refusal.
-- Not validated live: a bridge or charge through the deployed stack, an operator-approved
-  bridge, repayment collection, and reconcile after a provider FAILED or SUSPENDED (the sandbox
+- Deployed agent, 8 Oct 2026, on a deployment from a fresh clone into a new account: with the
+  obligation due a few days ahead the shortfall was refused ("payment is not due today"). After
+  a re-seed with that day's date and `"replace": true`, a customer requester registered the
+  shortfall (AUTO) and proposed a 25.00 USD bridge (SINGLE, approver tenant `k5:operator`). The
+  customer's own approver was refused with HTTP 403 ("this proposal is decided by another
+  tenant"), the kit 5 operator approved it, and the proposal SUCCEEDED.
+- Not validated live: a charge through the deployed stack, repayment collection, and reconcile after a provider FAILED or SUSPENDED (the sandbox
   cannot provoke them).
 
 ## Assumptions and limits

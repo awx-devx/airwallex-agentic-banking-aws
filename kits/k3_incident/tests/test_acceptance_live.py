@@ -14,9 +14,12 @@ BENEFICIARY_BANK_RETURNED), and one approved replacement that the sandbox driver
 Cleanup runs always, under the flock: an original still in flight goes
 through the kit's own simulate_transfer_failure (a bank return: refunded, no new money); a
 replacement still in flight is driven to PAID with transition_op (it is already debited). Cleanup
-never proposes a replacement. Then nothing may be at SENT, or the test fails. The run record
-($AWX_K3_SHAPES) is written from `finally` with the outcome, every cleanup step, the lock state
-and the replacement's request_id.
+never proposes a replacement. Then nothing may be at SENT, or the test fails. When cleanup
+cannot finish (an original still in flight, or an original the sandbox settled to PAID before
+the failure simulation applied), the test prints NEEDS_PERSON guidance naming each transfer id
+and what to check; cleanup never retries a simulation, which is not idempotent. The run record
+($AWX_K3_SHAPES) is written from `finally` with the outcome, every cleanup step, the lock state,
+the replacement's request_id and that guidance.
 
 `test_cleanup_*` prove the cleanup on FakeAirwallex by failing the scenario after SENT.
 """
@@ -26,6 +29,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import sys
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -278,18 +282,52 @@ def record(kit: Kit3, seen: dict[str, Any]) -> None:
         seen["replacement_request_ids"] = [str(r.get("request_id")) for r in reps]
         ids = [oid, *[str(r["id"]) for r in reps]]
         seen["end_state"] = {i: kit.transfer(i).get("status") for i in ids}
-        stuck = [i for i, st in seen["end_state"].items() if st in IN_FLIGHT]
-        if stuck:
-            seen["person_action"] = (
-                f"NEEDS_PERSON: {stuck} still in flight after cleanup. In the Airwallex sandbox "
-                "web app (or awx-sandbox), move each one: an original at SENT to FAILED with "
-                "failure_type BENEFICIARY_BANK_RETURNED (refunds it); at SCHEDULED or PROCESSING "
-                "to CANCELLED; a replacement to SENT then PAID. Never create a new transfer."
-            )
+        action = person_action(oid, seen["end_state"], seen)
+        if action is not None:
+            seen["person_action"] = action
     path = os.environ.get("AWX_K3_SHAPES")
     if path:
         with open(path, "w") as fh:
             json.dump(seen, fh, indent=2, default=str)
+
+
+def person_action(oid: str, end_state: dict[str, Any], seen: dict[str, Any]) -> str | None:
+    """NEEDS_PERSON guidance when cleanup could not finish, naming each transfer id and what
+    to check, or None. A run that did not pass should leave the original CANCELLED (refunded)
+    and any replacement PAID. A simulation that answered 500 or timed out may still apply
+    later, and cleanup never retries one, so a person reads the transfer again first."""
+    lines = []
+    original = end_state.get(oid)
+    reps = [i for i in end_state if i != oid]
+    if original in IN_FLIGHT:
+        lines.append(
+            f"original {oid} is still {original}: read it again in the sandbox first (a "
+            "transition that answered with an unknown outcome can still apply). If it stays "
+            f"{original}, move it in the Airwallex sandbox web app (or awx-sandbox): from SENT "
+            "to FAILED with failure_type BENEFICIARY_BANK_RETURNED (refunds it), from SCHEDULED "
+            "or PROCESSING to CANCELLED."
+        )
+    elif original == "PAID" and seen.get("outcome") != "passed":
+        paid_too = [i for i in reps if end_state.get(i) == "PAID"]
+        lines.append(
+            f"original {oid} ended PAID, not refunded: the sandbox settled it before the "
+            "failure simulation applied, so its amount went to the poc-i3-supplier beneficiary. "
+            "Nothing is left to move for it."
+            + (
+                f" Replacement {paid_too} is PAID too: the supplier was paid twice; record it."
+                if paid_too
+                else " No replacement was paid for it."
+            )
+        )
+    for rid in reps:
+        if end_state.get(rid) in IN_FLIGHT:
+            lines.append(
+                f"replacement {rid} is still {end_state[rid]}: read it again first, then move "
+                "it to SENT and then PAID (it is already debited)."
+            )
+    if not lines:
+        return None
+    return "NEEDS_PERSON: " + " ".join(lines) + " Never create a new transfer to fix this."
 
 
 def acceptance(
@@ -365,8 +403,10 @@ def acceptance(
             cleanup(kit, seen)
         finally:
             record(kit, seen)
+            if seen.get("person_action"):
+                print(seen["person_action"], file=sys.stderr)
         left = [i for i, s in (seen.get("end_state") or {}).items() if s in IN_FLIGHT]
-        assert not left, f"left in flight after cleanup: {left}"
+        assert not left, f"left in flight after cleanup: {left}. {seen.get('person_action')}"
 
 
 def test_cleanup_when_the_simulation_is_refused_gets_the_original_off_sent(tmp_path, monkeypatch):
@@ -397,7 +437,7 @@ def test_cleanup_when_the_simulation_is_refused_gets_the_original_off_sent(tmp_p
     assert "person_action" not in rec
 
 
-def test_record_tells_a_person_what_to_do_when_the_original_is_stuck(tmp_path, monkeypatch):
+def test_record_tells_a_person_what_to_do_when_the_original_is_stuck(tmp_path, monkeypatch, capsys):
     """Every cleanup transition is refused; the record says what a person does."""
     from awx_spine.fake import Fault
 
@@ -419,6 +459,50 @@ def test_record_tells_a_person_what_to_do_when_the_original_is_stuck(tmp_path, m
     assert rec["end_state"] == {seen["original"]: "SENT"}
     assert rec["person_action"].startswith("NEEDS_PERSON:")
     assert "BENEFICIARY_BANK_RETURNED" in rec["person_action"]
+    printed = capsys.readouterr().err
+    assert "NEEDS_PERSON:" in printed
+    assert seen["original"] in printed
+
+
+def test_an_original_the_sandbox_settled_during_cleanup_needs_a_person(
+    tmp_path, monkeypatch, capsys
+):
+    """The 8 Oct 2026 shape: the failure simulation answered 500 without applying, and the
+    sandbox then settled the original to PAID. Nothing is left at SENT, but the original was
+    not refunded, so the test prints NEEDS_PERSON naming it. No simulation is retried."""
+    from awx_spine.fake import Fault
+
+    monkeypatch.setenv("AWX_K3_SHAPES", str(tmp_path / "run.json"))
+    kit = Kit3.new()
+    seen: dict[str, Any] = {"run": "fake-8"}
+    real_execute = kit.fake.execute
+    failed_sends: list[str] = []
+
+    def unknown_then_paid(op):
+        if op.name == awx.TRANSITION_OP and op.body.get("next_status") == "FAILED":
+            failed_sends.append(op.request_id)
+            if kit.transfer(seen["original"])["status"] == "SENT":
+                kit.fake.inject("transfers.simulate_transition", Fault.SERVER_ERROR)
+                result = real_execute(op)  # 500, not applied
+                kit.fake.simulate(
+                    "transfer_transition", transfer_id=seen["original"], next_status="PAID"
+                )
+                return result
+        return real_execute(op)
+
+    kit.fake.execute = unknown_then_paid  # type: ignore[method-assign]
+    with pytest.raises(AssertionError, match="OUTCOME_UNKNOWN"):
+        acceptance(kit, seen)
+    oid = seen["original"]
+    assert kit.transfer(oid)["status"] == "PAID"
+    assert kit.replacements_of(oid) == []
+    assert len(failed_sends) == 1  # the simulation was not retried
+    rec = json.loads((tmp_path / "run.json").read_text())
+    assert rec["end_state"] == {oid: "PAID"}
+    assert rec["person_action"].startswith("NEEDS_PERSON:")
+    assert f"original {oid} ended PAID, not refunded" in rec["person_action"]
+    printed = capsys.readouterr().err
+    assert f"original {oid} ended PAID" in printed
 
 
 @pytest.mark.sandbox

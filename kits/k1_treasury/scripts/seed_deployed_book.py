@@ -7,7 +7,9 @@ through the same entry point; this script runs it on its own.
     uv run --all-packages python kits/k1_treasury/scripts/seed_deployed_book.py \\
         --ledger-table <the AwxSpine ledger table name> \\
         --map ob-supplier-eur=<poc-i1- beneficiary id> [--map ...] \\
-        --book-version demo-1 [--replace]
+        --book-version demo-1 [--replace] [--scenario-start YYYY-MM-DD]
+
+Without --scenario-start the demo's dates start at the seed time, rounded up to the next hour.
 
 Stores: awx_spine_aws.kit_store.DynamoDbKitStore (kit k1, AWS credentials from the
 environment). Reads: the sandbox client (its key is loaded by the client and never printed).
@@ -31,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--map", action="append", default=[], metavar="OBLIGATION=BENEFICIARY")
     parser.add_argument("--book-version", required=True)
     parser.add_argument("--replace", action="store_true")
+    parser.add_argument("--scenario-start", help="ISO date (midnight UTC) or date-time")
     args = parser.parse_args(argv)
 
     def store_for(tenant_id: str) -> DynamoDbKitStore:
@@ -51,9 +54,10 @@ def main(argv: list[str] | None = None) -> int:
             "beneficiaries": dict(item.split("=", 1) for item in args.map),
             "book_version": args.book_version,
             "replace": args.replace,
+            **({"scenario_start": args.scenario_start} if args.scenario_start else {}),
         },
     )
-    print(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=2, default=str))
     return 0
 
 
