@@ -1,0 +1,21 @@
+[project]
+name = "awx-infra"
+version = "0.1.0"
+description = "CDK app: spine stack, one stack per kit, agent stack"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "awx-common",
+    "awx-spine-aws",
+    "awx-agent",
+    "aws-cdk-lib==2.272.0",
+    "constructs==10.8.1",
+    "cdk-nag==2.38.2",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+awx-common = { workspace = true }
+awx-spine-aws = { workspace = true }
+awx-agent = { workspace = true }

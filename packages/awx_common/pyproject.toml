@@ -1,0 +1,13 @@
+[project]
+name = "awx-common"
+version = "0.1.0"
+description = "Shared contract: money, errors, operations, approvals, tenancy, tool and workflow specs"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/awx_common"]

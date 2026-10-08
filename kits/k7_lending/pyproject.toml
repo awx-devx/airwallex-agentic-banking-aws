@@ -1,0 +1,16 @@
+[project]
+name = "awx-k7-lending"
+version = "0.1.0"
+description = "Kit 7 Portfolio Lending Agent: loan subledger, repayment formula, collection, disbursement and reconciliation workflows"
+requires-python = ">=3.12,<3.13"
+dependencies = ["awx-common"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/awx_k7_lending"]
+
+[tool.uv.sources]
+awx-common = { workspace = true }

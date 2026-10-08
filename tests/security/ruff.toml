@@ -1,0 +1,5 @@
+# Test assertions here read better as one compound check per behaviour.
+extend = "../../pyproject.toml"
+
+[lint]
+extend-ignore = ["PT018"]

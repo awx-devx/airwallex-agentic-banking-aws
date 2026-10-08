@@ -1,0 +1,16 @@
+[project]
+name = "awx-k1-treasury"
+version = "0.1.0"
+description = "Kit 1 Adaptive Treasury Controller: fee-inclusive FX plan, whole-plan reserve check, quote burn"
+requires-python = ">=3.12,<3.13"
+dependencies = ["awx-common"]
+
+[tool.uv.sources]
+awx-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/awx_k1_treasury"]

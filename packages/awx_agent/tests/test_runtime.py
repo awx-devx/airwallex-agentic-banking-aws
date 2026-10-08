@@ -1,0 +1,253 @@
+import base64
+import json
+from types import SimpleNamespace
+
+import pytest
+from awx_agent.runtime import app as rt
+
+ENV = {"AWX_GATEWAY_URL": "https://gw.example/mcp", "AWX_REGION": "ap-southeast-2"}
+
+
+def _token(sub="user-1"):
+    seg = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()  # noqa: E731
+    return f"Bearer {seg({'alg': 'RS256'})}.{seg({'sub': sub})}.c2ln"
+
+
+class FakeMcp:
+    def __init__(self, url, token, kit):
+        self.args = (url, token, kit)
+        self.entered = False
+
+    def __enter__(self):
+        self.entered = True
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def list_tools_sync(self):
+        return ["k1___read_balances"]
+
+
+class ModelError(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.response = {"Error": {"Code": code}}
+
+
+def _agent_factory(log, fail_models=(), use_tool_then_fail=False):
+    def make(model_id, region, kit, tools, messages):
+        def call(prompt):
+            log.append(model_id)
+            if use_tool_then_fail:
+                agent.messages.append({"role": "assistant", "content": [{"toolUse": {}}]})
+            if model_id in fail_models:
+                raise ModelError("AccessDeniedException")
+            agent.messages.append({"role": "assistant", "content": [{"text": "ok"}]})
+            return "ok"
+
+        agent = SimpleNamespace(messages=list(messages))
+        agent.__call__ = call
+        return _Callable(agent, call)
+
+    return make
+
+
+class _Callable:
+    def __init__(self, ns, fn):
+        self.ns, self.fn = ns, fn
+
+    @property
+    def messages(self):
+        return self.ns.messages
+
+    def __call__(self, prompt):
+        return self.fn(prompt)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_sessions(monkeypatch):
+    monkeypatch.setattr(rt, "SESSIONS", rt._Sessions())
+
+
+def test_turn_uses_user_token_for_gateway_and_primary_model():
+    seen = {}
+
+    def mcp(url, token, kit):
+        seen["mcp"] = FakeMcp(url, token, kit)
+        return seen["mcp"]
+
+    log = []
+    out = rt.run_turn(
+        kit="k1",
+        prompt="hi",
+        token=_token(),
+        session_id="s" * 33,
+        env=ENV,
+        mcp_factory=mcp,
+        agent_factory=_agent_factory(log),
+    )
+    assert out == {"kit": "k1", "model": rt.DEFAULT_MODEL_ID, "reply": "ok"}
+    assert seen["mcp"].args == (ENV["AWX_GATEWAY_URL"], _token(), "k1")
+    assert seen["mcp"].entered
+
+
+def test_falls_back_when_primary_model_is_unavailable_before_any_tool_ran():
+    log = []
+    out = rt.run_turn(
+        kit="k1",
+        prompt="hi",
+        token=_token(),
+        session_id="s",
+        env=ENV,
+        mcp_factory=FakeMcp,
+        agent_factory=_agent_factory(log, fail_models={rt.DEFAULT_MODEL_ID}),
+    )
+    assert log == [rt.DEFAULT_MODEL_ID, rt.DEFAULT_FALLBACK_MODEL_ID]
+    assert out["model"] == rt.DEFAULT_FALLBACK_MODEL_ID
+
+
+def test_no_fallback_after_a_tool_ran():
+    with pytest.raises(ModelError):
+        rt.run_turn(
+            kit="k1",
+            prompt="hi",
+            token=_token(),
+            session_id="s",
+            env=ENV,
+            mcp_factory=FakeMcp,
+            agent_factory=_agent_factory(
+                [], fail_models={rt.DEFAULT_MODEL_ID}, use_tool_then_fail=True
+            ),
+        )
+
+
+def test_history_is_per_user():
+    log = []
+    kw = dict(
+        kit="k1",
+        prompt="hi",
+        session_id="s",
+        env=ENV,
+        mcp_factory=FakeMcp,
+        agent_factory=_agent_factory(log),
+    )
+    rt.run_turn(token=_token("a"), **kw)
+    rt.run_turn(token=_token("a"), **kw)
+    rt.run_turn(token=_token("b"), **kw)
+    assert len(rt.SESSIONS.get(("s", "k1", "a"))) == 2
+    assert len(rt.SESSIONS.get(("s", "k1", "b"))) == 1
+
+
+def test_entrypoint_rejects_bad_payloads_and_missing_token():
+    ctx = SimpleNamespace(request_headers={"Authorization": _token()}, session_id="s")
+    assert rt.invoke({"kit": "k9", "prompt": "x"}, ctx)["error"]["code"] == "BAD_REQUEST"
+    assert rt.invoke({"kit": "k1", "prompt": " "}, ctx)["error"]["code"] == "BAD_REQUEST"
+    assert (
+        rt.invoke({"kit": "k1", "prompt": "x"}, SimpleNamespace(request_headers={}))["error"][
+            "code"
+        ]
+        == "BAD_REQUEST"
+    )
+
+
+def test_tool_filter_admits_only_this_kits_read_and_propose_tools():
+    (pattern,) = rt.kit_tool_filter("k2")["allowed"]
+    assert pattern.match("k2___read_card")
+    assert pattern.match("k2___propose_card_controls")
+    assert not pattern.match("k1___read_card")
+    assert not pattern.match("k2___delete_card")
+
+
+# --- every page of the Gateway's tool list; refuse a turn with no tools --------------------
+
+
+class _Page(list):
+    def __init__(self, items, token=None):
+        super().__init__(items)
+        self.pagination_token = token
+
+
+class PagedMcp(FakeMcp):
+    """Gateway-like paging: the filtered tools of page n, then a token for page n+1."""
+
+    def __init__(self, pages):
+        super().__init__("u", "t", "k")
+        self.pages = pages
+        self.calls = []
+
+    def list_tools_sync(self, pagination_token=None):
+        self.calls.append(pagination_token)
+        i = 0 if pagination_token is None else int(pagination_token)
+        nxt = str(i + 1) if i + 1 < len(self.pages) else None
+        return _Page(self.pages[i], nxt)
+
+
+def _run(mcp, log, kit="k7"):
+    return rt.run_turn(
+        kit=kit,
+        prompt="hi",
+        token=_token(),
+        session_id="s" * 40,
+        env=ENV,
+        mcp_factory=lambda *a: mcp,
+        agent_factory=_tools_agent(log),
+    )
+
+
+def _tools_agent(log):
+    def make(model_id, region, kit, tools, messages):
+        log.append(list(tools))
+        return _Callable(SimpleNamespace(messages=list(messages)), lambda p: "ok")
+
+    return make
+
+
+@pytest.mark.parametrize(
+    "pages",
+    [
+        [[], ["k7___read_loan", "k7___propose_disburse_advance"]],  # kit on page 2 (live shape)
+        [[], ["k7___read_loan"], ["k7___propose_collect_weekly_repayment"]],  # three pages
+    ],
+    ids=["two-pages", "three-pages"],
+)
+def test_tools_on_later_pages_reach_the_model(pages):
+    mcp, log = PagedMcp(pages), []
+    out = _run(mcp, log)
+    assert out["reply"] == "ok"
+    assert log == [[t for page in pages for t in page]]
+    assert mcp.calls == [None, *[str(i) for i in range(1, len(pages))]]
+
+
+def test_a_kit_with_no_tools_is_refused_without_calling_the_model():
+    mcp, log = PagedMcp([[], [], []]), []
+    out = _run(mcp, log)
+    assert out == {
+        "kit": "k7",
+        "error": {
+            "code": "NO_TOOLS",
+            "message": "no tools are available for kit k7; nothing was done",
+        },
+    }
+    assert log == []
+
+
+def test_the_page_loop_is_bounded_and_fails_closed():
+    class Endless(PagedMcp):
+        def list_tools_sync(self, pagination_token=None):
+            self.calls.append(pagination_token)
+            return _Page(["k7___read_loan"], "again")
+
+    mcp, log = Endless([]), []
+    with pytest.raises(RuntimeError, match="did not end within 20 pages"):
+        _run(mcp, log)
+    assert len(mcp.calls) == rt.MAX_TOOL_PAGES
+    assert log == []
+
+
+def test_the_prompt_forbids_quoting_values_no_tool_returned():
+    from awx_agent.runtime.prompt import system_prompt
+
+    p = system_prompt("k7")
+    assert "that a tool returned in this conversation" in p
+    assert "I could not reach the tools" in p

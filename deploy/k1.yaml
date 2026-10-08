@@ -1,0 +1,20 @@
+# Kit 1 (Adaptive Treasury Controller) deploy file for `awx-deploy plan|apply`.
+# From kits/k1_treasury/README.md "Setting up a deployed kit" and DESIGN.md "Seeding a deployed book".
+#
+# Kit 1 runs as the platform tenant, so it has no tenants rows.
+# Variables (pass with --var NAME=value or --vars vars.yaml; unresolved ones are refused):
+#   K1_BEN_SUPPLIER_EUR  the id of the poc-i1-supplier-de EUR SWIFT beneficiary in the
+#                        sandbox (create it first if it does not exist)
+#   K1_BEN_SHIPPING      a US LOCAL poc-i1- beneficiary for ob-shipping (create it first)
+# Before or after: fund the platform wallets with a sandbox deposit, under
+# `flock /tmp/awx-sandbox.lock` (not an awx-deploy step: nothing here moves money).
+kit: k1
+tenants: []
+steps:
+  - command: seed_treasury_book
+    note: once; a second apply refuses here ("already seeded") and writes nothing
+    args:
+      beneficiaries:
+        ob-supplier-eur: "${K1_BEN_SUPPLIER_EUR}"
+        ob-shipping: "${K1_BEN_SHIPPING}"
+      book_version: demo-1

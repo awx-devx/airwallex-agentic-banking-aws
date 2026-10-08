@@ -1,0 +1,23 @@
+[project]
+name = "awx-k8-settlement"
+version = "0.1.0"
+description = "Kit 8 Marketplace Settlement Agent: seller reserve ledger, cycle identity, recovery"
+requires-python = ">=3.12,<3.13"
+dependencies = ["awx-common"]
+
+# Tests run the kit on the real spine (local_runner, FakeAirwallex, DynamoDbKitStore on moto).
+# The kit itself imports only awx_common.
+[dependency-groups]
+dev = ["awx-spine", "awx-spine-aws", "moto[dynamodb]==5.2.3"]
+
+[tool.uv.sources]
+awx-common = { workspace = true }
+awx-spine = { workspace = true }
+awx-spine-aws = { workspace = true }
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/awx_k8_settlement"]

@@ -1,0 +1,16 @@
+[project]
+name = "awx-k5-platform-spend"
+version = "0.1.0"
+description = "Kit 5 Platform Spend Controller: tenant map, platform capital ledger, reserve allocator"
+requires-python = ">=3.12,<3.13"
+dependencies = ["awx-common"]
+
+[tool.uv.sources]
+awx-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/awx_k5_platform_spend"]

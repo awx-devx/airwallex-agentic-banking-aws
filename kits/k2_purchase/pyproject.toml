@@ -1,0 +1,23 @@
+[project]
+name = "awx-k2-purchase"
+version = "0.1.0"
+description = "Kit 2: Intent-Bound Purchase Agent (card controls bound to a purchase decision)"
+requires-python = ">=3.12,<3.13"
+dependencies = ["awx-common"]
+
+# Tests run the kit on the real spine (local_runner over FakeAirwallex) and on DynamoDbKitStore
+# under moto.
+[dependency-groups]
+dev = ["awx-spine", "awx-spine-aws", "moto[dynamodb]==5.2.3"]
+
+[tool.uv.sources]
+awx-common = { workspace = true }
+awx-spine = { workspace = true }
+awx-spine-aws = { workspace = true }
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/awx_k2_purchase"]

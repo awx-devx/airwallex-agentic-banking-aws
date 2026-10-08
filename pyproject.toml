@@ -1,0 +1,38 @@
+[project]
+name = "airwallex-agentic-banking-on-aws"
+version = "0.1.0"
+description = "AWS-native reference implementations of the Airwallex Agentic Banking Hackathon kits 1 to 8"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.16.10", "hypothesis==6.168.5"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*", "kits/*", "infra"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["cdk.out", "node_modules", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "PT", "RUF", "DTZ"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "S105", "S106", "S311"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers --import-mode=importlib"
+testpaths = ["packages", "kits", "infra", "tests"]
+# pytest's defaults plus cdk.out: a CLI `cdk synth` bundles packages (with their own tests) there.
+norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "cdk.out"]
+markers = [
+    "sandbox: calls the Airwallex sandbox; run with make sandbox-test",
+    "synth: runs cdk synth; run with make synth-test",
+    "live: calls deployed AWS resources",
+]

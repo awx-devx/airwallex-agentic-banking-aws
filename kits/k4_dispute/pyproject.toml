@@ -1,0 +1,16 @@
+[project]
+name = "awx-k4-dispute"
+version = "0.1.0"
+description = "Kit 4 Dispute Response Agent: dispute economics, deadlines, evidence pack, approval matrix"
+requires-python = ">=3.12,<3.13"
+dependencies = ["awx-common"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/awx_k4_dispute"]
+
+[tool.uv.sources]
+awx-common = { workspace = true }

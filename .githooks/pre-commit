@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks a commit whose staged files look like they carry a credential.
+exec python3.12 "$(git rev-parse --show-toplevel)/scripts/secret_scan.py" --staged

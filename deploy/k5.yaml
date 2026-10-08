@@ -1,0 +1,39 @@
+# Kit 5 (Platform Spend Controller) deploy file for `awx-deploy plan|apply`.
+# From kits/k5_platform_spend/README.md "Setting up a deployed kit" and DESIGN.md "Operator commands".
+#
+# Variables:
+#   K5_ACCT_ALPHA, K5_ACCT_BRAVO, K5_ACCT_CHARLIE   acct_... of poc-i5-t-alpha / -t-bravo /
+#                                                   -t-charlie
+#   K5_DUE_ON, K5_EXPECTED_DEPOSIT_ON               YYYY-MM-DD for the demo obligation
+# Each tenants row must name the same account the setup seeds for that tenant.
+# Put the fund_capital amount into the platform wallet too, with a sandbox deposit under
+# `flock /tmp/awx-sandbox.lock`, so the wallet-room check and the books agree.
+kit: k5
+tenants:
+  - {tenant_id: t-alpha, kit: k5, role: customer, connected_account_id: "${K5_ACCT_ALPHA}"}
+  - {tenant_id: t-bravo, kit: k5, role: customer, connected_account_id: "${K5_ACCT_BRAVO}"}
+  - {tenant_id: t-charlie, kit: k5, role: customer, connected_account_id: "${K5_ACCT_CHARLIE}"}
+steps:
+  - command: seed_platform_setup
+    note: once; a replace runs only while kit 5's state machines are quiet
+    args:
+      currency: USD
+      reserve_floor: "600"
+      high_risk_bridge: "1000"
+      max_bridge_per_tenant: "800"
+      max_bridge_days: 7
+      card_programs:
+        standard: {per_transaction_limit: "100", monthly_limit: "250",
+                   allowed_currencies: [USD], allowed_merchant_categories: ["5734"]}
+      tenants:
+        - {tenant_id: t-alpha, connected_account_id: "${K5_ACCT_ALPHA}", display_name: Alpha}
+        - {tenant_id: t-bravo, connected_account_id: "${K5_ACCT_BRAVO}", display_name: Bravo}
+        - {tenant_id: t-charlie, connected_account_id: "${K5_ACCT_CHARLIE}", display_name: Charlie}
+      obligations:
+        - {obligation_id: ob-a1, tenant_id: t-alpha, amount_due: "500",
+           due_on: "${K5_DUE_ON}", expected_deposit_on: "${K5_EXPECTED_DEPOSIT_ON}"}
+      monthly_fees: {t-alpha: "25"}
+      late_repayments: {}
+  - command: fund_capital
+    note: feed keyed by key; ledger only
+    args: {key: initial, amount: "1000"}

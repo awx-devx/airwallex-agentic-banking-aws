@@ -1,0 +1,26 @@
+[project]
+name = "awx-spine-aws"
+version = "0.1.0"
+description = "AWS runtime for the spine: workflow engine, Lambda handlers, DynamoDB stores, Secrets Manager credentials, local runner and the awx-deploy CLI"
+requires-python = ">=3.12,<3.13"
+# boto3 is in the Lambda Python runtime; it is declared for local use and tests only and is
+# never bundled into a Lambda asset.
+# pyyaml: awx-deploy reads per-kit deploy files (deploy/*.yaml); never bundled into a Lambda.
+dependencies = ["awx-common", "awx-spine", "boto3==1.43.108", "pyyaml==6.0.3"]
+
+[project.scripts]
+awx-deploy = "awx_spine_aws.deploy:main"
+
+[dependency-groups]
+dev = ["moto[dynamodb]==5.2.3"]
+
+[tool.uv.sources]
+awx-common = { workspace = true }
+awx-spine = { workspace = true }
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/awx_spine_aws"]

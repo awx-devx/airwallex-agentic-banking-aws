@@ -1,0 +1,4 @@
+Support mailbox export (synthetic)
+2026-09-01 Customer email to support: please process my refund for the cancelled order
+2026-09-08 Customer email to support: second request, still no refund
+No reply was sent by support

@@ -1,0 +1,37 @@
+# Kit 7 (Portfolio Lending Agent) deploy file for `awx-deploy plan|apply`.
+# From kits/k7_lending/README.md "Setting up a deployed kit" and DESIGN.md "Operator commands and runbook".
+#
+# Variables:
+#   K7_TENANT_LOAN_A, K7_TENANT_LOAN_C   the borrowers' Cognito custom:tenant_id values
+#   K7_ACCT_LOAN_A, K7_ACCT_LOAN_C       acct_... of poc-i7-loan-a / poc-i7-loan-c
+#   K7_FIRST_PERIOD                      the demo book's first DEMO300S-<n> collection period:
+#                                        period n starts at 2026-01-01T00:00Z + n x 300 s
+#                                        (kits/k7_lending/DESIGN.md "DEMO collection periods")
+#   K7_DEPOSIT_ID                        the platform-wallet deposit made for the capital, done
+#                                        first as a separate step under `flock /tmp/awx-sandbox.lock`
+# k7:operator is the kit's operator tenants row (kit k7, role operator, no connected account).
+# reconcile_portfolio runs as k7:operator when deployed:
+#   awx-deploy trigger k7 reconcile_portfolio intent.json --tenant k7:operator
+# collect_weekly_repayment runs as the borrower's own tenant (--tenant ${K7_TENANT_LOAN_A}).
+kit: k7
+tenants:
+  - {tenant_id: "k7:operator", kit: k7, role: operator}
+  - {tenant_id: "${K7_TENANT_LOAN_A}", kit: k7, role: customer, connected_account_id: "${K7_ACCT_LOAN_A}"}
+  - {tenant_id: "${K7_TENANT_LOAN_C}", kit: k7, role: customer, connected_account_id: "${K7_ACCT_LOAN_C}"}
+steps:
+  - command: open_portfolio
+    note: once; mints the book id
+    args: {currency: USD, reserve_floor: "5000.00", min_disbursement: "1000.00",
+           disbursement_increment: "100.00", dual_approval_above: "25000.00", demo_period_s: 300}
+  - command: add_loan
+    note: feed keyed by loan_id; first_week is the demo book's own DEMO300S-<n> period
+    args: {loan_id: loan-a, tenant_id: "${K7_TENANT_LOAN_A}", connected_account_id: "${K7_ACCT_LOAN_A}",
+           commitment: "8000.00", fee_rate: "0.08", share_rate: "0.10", weekly_cap: "1500.00",
+           weekly_floor: "200.00", first_week: "${K7_FIRST_PERIOD}"}
+  - command: add_loan
+    args: {loan_id: loan-c, tenant_id: "${K7_TENANT_LOAN_C}", connected_account_id: "${K7_ACCT_LOAN_C}",
+           commitment: "8000.00", fee_rate: "0.08", share_rate: "0.10", weekly_cap: "1500.00",
+           weekly_floor: "200.00", first_week: "${K7_FIRST_PERIOD}"}
+  - command: fund_capital
+    note: feed keyed by the deposit; ledger only
+    args: {deposit_id: "${K7_DEPOSIT_ID}", amount: "20000.00"}

@@ -1,0 +1,588 @@
+=== r1-ben-create :: POST /beneficiaries/create  
+--- body:
+{"request_id":"806a77f4-de62-4890-9aa9-57f74151283f","nickname":"poc-s1-r1-bendup","transfer_methods":["LOCAL"],
+"beneficiary":{"type":"BANK_ACCOUNT","entity_type":"COMPANY","company_name":"poc-s1 Dup Inc",
+"address":{"street_address":"1 Main Street","city":"New York","state":"US-NY","postcode":"10001","country_code":"US"},
+"bank_details":{"account_currency":"USD","account_name":"poc-s1 Dup Inc","account_number":"56999933","account_routing_type1":"aba","account_routing_value1":"021000021","bank_account_category":"Checking","bank_country_code":"US","local_clearing_system":"ACH"}}}
+
+HTTP 201
+{
+  "beneficiary": {
+    "address": {
+      "city": "New York",
+      "country_code": "US",
+      "postcode": "10001",
+      "state": "US-NY",
+      "street_address": "1 Main Street"
+    },
+    "bank_details": {
+      "account_currency": "USD",
+      "account_name": "poc-s1 Dup Inc",
+      "account_number": "56999933",
+      "account_routing_type1": "aba",
+      "account_routing_value1": "021000021",
+      "bank_account_category": "Checking",
+      "bank_country_code": "US",
+      "bank_name": "JPMorgan Chase Bank, NA",
+      "local_clearing_system": "ACH"
+    },
+    "entity_type": "COMPANY",
+    "type": "BANK_ACCOUNT"
+  },
+  "id": "968bdfc6-a365-4e27-b9f2-b7f51ff94031",
+  "nickname": "poc-s1-r1-bendup",
+  "payer_entity_type": "COMPANY",
+  "transfer_methods": [
+    "LOCAL"
+  ]
+}
+=== r1-ben-replay-same :: POST /beneficiaries/create  
+--- body:
+{"request_id":"806a77f4-de62-4890-9aa9-57f74151283f","nickname":"poc-s1-r1-bendup","transfer_methods":["LOCAL"],
+"beneficiary":{"type":"BANK_ACCOUNT","entity_type":"COMPANY","company_name":"poc-s1 Dup Inc",
+"address":{"street_address":"1 Main Street","city":"New York","state":"US-NY","postcode":"10001","country_code":"US"},
+"bank_details":{"account_currency":"USD","account_name":"poc-s1 Dup Inc","account_number":"56999933","account_routing_type1":"aba","account_routing_value1":"021000021","bank_account_category":"Checking","bank_country_code":"US","local_clearing_system":"ACH"}}}
+
+HTTP 201
+{
+  "beneficiary": {
+    "address": {
+      "city": "New York",
+      "country_code": "US",
+      "postcode": "10001",
+      "state": "US-NY",
+      "street_address": "1 Main Street"
+    },
+    "bank_details": {
+      "account_currency": "USD",
+      "account_name": "poc-s1 Dup Inc",
+      "account_number": "56999933",
+      "account_routing_type1": "aba",
+      "account_routing_value1": "021000021",
+      "bank_account_category": "Checking",
+      "bank_country_code": "US",
+      "bank_name": "JPMorgan Chase Bank, NA",
+      "local_clearing_system": "ACH"
+    },
+    "entity_type": "COMPANY",
+    "type": "BANK_ACCOUNT"
+  },
+  "id": "4cacc1bf-0e57-41a4-b5e4-b7effa92b8aa",
+  "nickname": "poc-s1-r1-bendup",
+  "payer_entity_type": "COMPANY",
+  "transfer_methods": [
+    "LOCAL"
+  ]
+}
+=== r1-card-update-limits :: POST /issuing/cards/02655c40-fcea-4407-80ac-d6dd1d2bc429/update  
+--- body:
+{"authorization_controls":{"allowed_transaction_count":"MULTIPLE","allowed_currencies":["USD"],"allowed_merchant_categories":["5734"],"transaction_limits":{"currency":"USD","limits":[{"amount":0.01,"interval":"PER_TRANSACTION"}]}}}
+
+HTTP 200
+{
+  "alert_settings": {
+    "low_remaining_transaction_limit": {
+      "enabled": true,
+      "percent": 10
+    }
+  },
+  "authorization_controls": {
+    "allowed_currencies": [
+      "USD"
+    ],
+    "allowed_merchant_brands": {
+      "categories": [],
+      "ids": [],
+      "subcategories": []
+    },
+    "allowed_merchant_categories": [
+      "5734"
+    ],
+    "allowed_merchant_countries": [],
+    "allowed_transaction_count": "MULTIPLE",
+    "blocked_transaction_usages": [],
+    "transaction_limits": {
+      "currency": "USD",
+      "limits": [
+        {
+          "amount": 0.01,
+          "interval": "PER_TRANSACTION"
+        }
+      ]
+    }
+  },
+  "brand": "VISA",
+  "card_id": "02655c40-fcea-4407-80ac-d6dd1d2bc429",
+  "card_number": "************0955",
+  "card_status": "ACTIVE",
+  "cardholder_id": "442c4979-cc79-4c24-a03e-4b0778d52433",
+  "created_at": "2026-10-06T04:48:24.850+0000",
+  "created_by": "poc-s1",
+  "form_factor": "VIRTUAL",
+  "is_personalized": false,
+  "metadata": {
+    "poc": "poc-s1-card1"
+  },
+  "name_on_card": "Sandbox Business",
+  "nick_name": "poc-s1-card1",
+  "program": {
+    "purpose": "COMMERCIAL",
+    "type": "DEBIT"
+  },
+  "purpose": "SUBSCRIPTIONS",
+  "request_id": "c27249a5-e221-413e-a670-64f5b77463a3",
+  "updated_at": "2026-10-06T04:48:24.850+0000"
+}
+=== r1-single-phase-0.01 :: POST /simulation/issuing/create  
+--- body:
+{"card_id":"02655c40-fcea-4407-80ac-d6dd1d2bc429","transaction_amount":0.01,"transaction_currency":"USD","merchant_category_code":"5734","merchant_info":"poc-s1-r1-sp","single_phase":true}
+
+HTTP 201
+{
+  "card_transaction_event_id": "01a10fd6-2278-7000-8dd2-3f0bf929dd58",
+  "card_transaction_id": "01a10fd6-2278-7000-a7d2-292b604cf9b9",
+  "card_transaction_lifecycle_id": "01a10fd6-2278-7000-97ee-4e4b3e043988",
+  "type": "CLEARING",
+  "subtype": "CLEARING",
+  "process_result": "APPROVED",
+  "transacted_at": "2026-10-06T06:10:54.200+0000",
+  "updated_at": "2026-10-06T06:10:54.887+0000",
+  "card_id": "02655c40-fcea-4407-80ac-d6dd1d2bc429",
+  "transaction_amount": 0.01,
+  "transaction_currency": "USD",
+  "billing_amount": 0.01,
+  "billing_currency": "USD",
+  "merchant": {
+    "name": "poc-s1-r1-sp_____________",
+    "city": "_____________",
+    "country": "",
+    "category_code": "5734"
+  },
+  "auth_code": "8NT7UH",
+  "retrieval_ref": "174237470235",
+  "masked_card_number": "************0955",
+  "card_nickname": "poc-s1-card1",
+  "network_transaction_id": "270998164951613"
+}
+=== r1-single-phase-0.02 :: POST /simulation/issuing/create  
+--- body:
+{"card_id":"02655c40-fcea-4407-80ac-d6dd1d2bc429","transaction_amount":0.02,"transaction_currency":"USD","merchant_category_code":"5734","merchant_info":"poc-s1-r1-sp","single_phase":true}
+
+HTTP 201
+{
+  "card_transaction_event_id": "01a10fd6-30c4-7000-b9be-cdeceffbdd59",
+  "card_transaction_id": "01a10fd6-30c4-7000-9d87-d59d4cd7b43d",
+  "card_transaction_lifecycle_id": "01a10fd6-30c4-7000-a39b-9aff7c9196b0",
+  "type": "CLEARING",
+  "subtype": "CLEARING",
+  "process_result": "DECLINED",
+  "transacted_at": "2026-10-06T06:10:57.860+0000",
+  "updated_at": "2026-10-06T06:10:58.376+0000",
+  "card_id": "02655c40-fcea-4407-80ac-d6dd1d2bc429",
+  "transaction_amount": 0.02,
+  "transaction_currency": "USD",
+  "billing_amount": 0.02,
+  "billing_currency": "USD",
+  "merchant": {
+    "name": "poc-s1-r1-sp_____________",
+    "city": "_____________",
+    "country": "",
+    "category_code": "5734"
+  },
+  "auth_code": "52BE94",
+  "retrieval_ref": "677084039782",
+  "masked_card_number": "************0955",
+  "failure_reason": "LIMIT_EXCEEDED",
+  "card_nickname": "poc-s1-card1",
+  "network_transaction_id": "401004104478881"
+}
+=== r1-cancel-from-sent :: POST /simulation/transfers/dfe8614c-bff5-4995-8334-dd39ae52656d/transition  
+--- body:
+{"next_status":"CANCELLED"}
+
+HTTP 500
+{
+  "code": "operation_failed",
+  "message": "Request could not be processed"
+}
+=== r1-cleanup-fail-dfe8614c-bff5-4995-8334-dd39ae52656d :: POST /simulation/transfers/dfe8614c-bff5-4995-8334-dd39ae52656d/transition  
+--- body:
+{"next_status":"FAILED","failure_type":"CLIENT_REQUESTED"}
+
+HTTP 200
+{
+  "request_id": "f421672e-c223-5eb3-a5c2-0a745dc63952",
+  "id": "dfe8614c-bff5-4995-8334-dd39ae52656d",
+  "transfer_currency": "USD",
+  "transfer_amount": 1,
+  "source_amount": 1,
+  "fee_currency": "USD",
+  "fee_amount": 0,
+  "fee_paid_by": "PAYER",
+  "amount_payer_pays": 1,
+  "amount_beneficiary_receives": 1,
+  "transfer_date": "2026-10-06",
+  "reason": "goods_purchased",
+  "reference": "poc-s1-ct-438d6d4e-nosettle",
+  "payer": {
+    "entity_type": "COMPANY",
+    "company_name": "Sandbox Business",
+    "address": {
+      "street_address": "18811 Jenkins Tunnel",
+      "country_code": "AU",
+      "postcode": "09193",
+      "state": "Oregon",
+      "city": "McGlynnview"
+    },
+    "additional_info": {
+      "business_registration_type": "COMPANY",
+      "business_registration_number": "X12345678",
+      "business_incorporation_date": "2017-06-03"
+    }
+  },
+  "beneficiary_id": "42d4f893-924a-452a-9a08-f26540994651",
+  "beneficiary": {
+    "type": "BANK_ACCOUNT",
+    "entity_type": "COMPANY",
+    "address": {
+      "street_address": "1 Main Street",
+      "country_code": "US",
+      "postcode": "10001",
+      "state": "New York",
+      "city": "New York"
+    },
+    "bank_details": {
+      "bank_name": "JPMorgan Chase Bank, NA",
+      "bank_country_code": "US",
+      "account_name": "poc-s1 Supplier Inc",
+      "account_number": "56999911",
+      "account_currency": "USD",
+      "account_routing_type1": "aba",
+      "account_routing_value1": "021000021",
+      "local_clearing_system": "ACH",
+      "bank_account_category": "Checking"
+    }
+  },
+  "short_reference_id": "P261006-DH98K70",
+  "status": "FAILED",
+  "failure_reason": "91002: Client requested",
+  "failure_type": "INCORRECT_ROUTING",
+  "created_at": "2026-10-06T06:25:40+0000",
+  "updated_at": "2026-10-06T06:26:57+0000",
+  "transfer_method": "LOCAL",
+  "swift_charge_option": "SHARED",
+  "source_currency": "USD",
+  "dispatch_date": "2026-10-06",
+  "remarks": "",
+  "funding": {
+    "status": "FUNDED"
+  }
+}
+=== r1-cleanup-fail-defb0cc2-33c0-4c17-bb39-73f5cfc8fd2a :: POST /simulation/transfers/defb0cc2-33c0-4c17-bb39-73f5cfc8fd2a/transition  
+--- body:
+{"next_status":"FAILED","failure_type":"CLIENT_REQUESTED"}
+
+HTTP 200
+{
+  "request_id": "c5079bff-6280-5780-9574-c9aee50e2e0d",
+  "id": "defb0cc2-33c0-4c17-bb39-73f5cfc8fd2a",
+  "transfer_currency": "USD",
+  "transfer_amount": 1,
+  "source_amount": 1,
+  "fee_currency": "USD",
+  "fee_amount": 0,
+  "fee_paid_by": "PAYER",
+  "amount_payer_pays": 1,
+  "amount_beneficiary_receives": 1,
+  "transfer_date": "2026-10-06",
+  "reason": "goods_purchased",
+  "reference": "poc-s1-ct-b9855894",
+  "payer": {
+    "entity_type": "COMPANY",
+    "company_name": "Sandbox Business",
+    "address": {
+      "street_address": "18811 Jenkins Tunnel",
+      "country_code": "AU",
+      "postcode": "09193",
+      "state": "Oregon",
+      "city": "McGlynnview"
+    },
+    "additional_info": {
+      "business_registration_type": "COMPANY",
+      "business_registration_number": "X12345678",
+      "business_incorporation_date": "2017-06-03"
+    }
+  },
+  "beneficiary_id": "42d4f893-924a-452a-9a08-f26540994651",
+  "beneficiary": {
+    "type": "BANK_ACCOUNT",
+    "entity_type": "COMPANY",
+    "address": {
+      "street_address": "1 Main Street",
+      "country_code": "US",
+      "postcode": "10001",
+      "state": "New York",
+      "city": "New York"
+    },
+    "bank_details": {
+      "bank_name": "JPMorgan Chase Bank, NA",
+      "bank_country_code": "US",
+      "account_name": "poc-s1 Supplier Inc",
+      "account_number": "56999911",
+      "account_currency": "USD",
+      "account_routing_type1": "aba",
+      "account_routing_value1": "021000021",
+      "local_clearing_system": "ACH",
+      "bank_account_category": "Checking"
+    }
+  },
+  "short_reference_id": "P261006-C62H0PF",
+  "status": "FAILED",
+  "failure_reason": "91002: Client requested",
+  "failure_type": "INCORRECT_ROUTING",
+  "created_at": "2026-10-06T06:24:52+0000",
+  "updated_at": "2026-10-06T06:26:58+0000",
+  "transfer_method": "LOCAL",
+  "swift_charge_option": "SHARED",
+  "source_currency": "USD",
+  "dispatch_date": "2026-10-06",
+  "remarks": "",
+  "funding": {
+    "status": "FUNDED"
+  }
+}
+=== r1-cleanup-fail-e529340f :: POST /simulation/transfers/e529340f-5e99-4019-a136-a81d5689b37b/transition  
+--- body:
+{"next_status":"FAILED","failure_type":"CLIENT_REQUESTED"}
+
+HTTP 500
+{
+  "code": "operation_failed",
+  "message": "Request could not be processed"
+}
+=== r1-autosettle-create :: POST /transfers/create  
+--- body:
+{"request_id":"d7a49936-1d4d-479d-97b9-3820ceda3be8","beneficiary_id":"42d4f893-924a-452a-9a08-f26540994651","transfer_amount":1.00,"transfer_currency":"USD","source_currency":"USD","transfer_method":"LOCAL","reference":"poc-s1-r1-autosettle-nosettle","reason":"goods_purchased"}
+
+HTTP 201
+{
+  "amount_beneficiary_receives": 1,
+  "amount_payer_pays": 1,
+  "beneficiary": {
+    "address": {
+      "city": "New York",
+      "country_code": "US",
+      "postcode": "10001",
+      "state": "US-NY",
+      "street_address": "1 Main Street"
+    },
+    "bank_details": {
+      "account_currency": "USD",
+      "account_name": "poc-s1 Supplier Inc",
+      "account_number": "56999911",
+      "account_routing_type1": "aba",
+      "account_routing_value1": "021000021",
+      "bank_account_category": "Checking",
+      "bank_country_code": "US",
+      "bank_name": "JPMorgan Chase Bank, NA",
+      "local_clearing_system": "ACH"
+    },
+    "entity_type": "COMPANY",
+    "type": "BANK_ACCOUNT"
+  },
+  "beneficiary_id": "42d4f893-924a-452a-9a08-f26540994651",
+  "created_at": "2026-10-06T06:32:05+0000",
+  "fee_amount": 0,
+  "fee_currency": "USD",
+  "fee_paid_by": "PAYER",
+  "funding": {
+    "status": "FUNDED"
+  },
+  "id": "400af553-8f36-4239-9794-fa3907dafc34",
+  "payer": {
+    "additional_info": {
+      "business_incorporation_date": "2017-06-03",
+      "business_registration_number": "X12345678",
+      "business_registration_type": "COMPANY"
+    },
+    "address": {
+      "city": "McGlynnview",
+      "country_code": "AU",
+      "postcode": "09193",
+      "state": "Oregon",
+      "street_address": "18811 Jenkins Tunnel"
+    },
+    "company_name": "Sandbox Business",
+    "entity_type": "COMPANY"
+  },
+  "reason": "goods_purchased",
+  "reference": "poc-s1-r1-autosettle-nosettle",
+  "remarks": "",
+  "request_id": "d7a49936-1d4d-479d-97b9-3820ceda3be8",
+  "short_reference_id": "P261006-78Z28FP",
+  "source_amount": 1,
+  "source_currency": "USD",
+  "status": "SCHEDULED",
+  "swift_charge_option": "SHARED",
+  "transfer_amount": 1,
+  "transfer_currency": "USD",
+  "transfer_date": "2026-10-06",
+  "transfer_method": "LOCAL",
+  "updated_at": "2026-10-06T06:32:05+0000"
+}
+=== r1-autosettle-sent :: POST /simulation/transfers/400af553-8f36-4239-9794-fa3907dafc34/transition  
+--- body:
+{"next_status":"SENT"}
+
+HTTP 200
+{
+  "request_id": "d7a49936-1d4d-479d-97b9-3820ceda3be8",
+  "id": "400af553-8f36-4239-9794-fa3907dafc34",
+  "transfer_currency": "USD",
+  "transfer_amount": 1,
+  "source_amount": 1,
+  "fee_currency": "USD",
+  "fee_amount": 0,
+  "fee_paid_by": "PAYER",
+  "amount_payer_pays": 1,
+  "amount_beneficiary_receives": 1,
+  "transfer_date": "2026-10-06",
+  "reason": "goods_purchased",
+  "reference": "poc-s1-r1-autosettle-nosettle",
+  "payer": {
+    "entity_type": "COMPANY",
+    "company_name": "Sandbox Business",
+    "address": {
+      "street_address": "18811 Jenkins Tunnel",
+      "country_code": "AU",
+      "postcode": "09193",
+      "state": "Oregon",
+      "city": "McGlynnview"
+    },
+    "additional_info": {
+      "business_registration_type": "COMPANY",
+      "business_registration_number": "X12345678",
+      "business_incorporation_date": "2017-06-03"
+    }
+  },
+  "beneficiary_id": "42d4f893-924a-452a-9a08-f26540994651",
+  "beneficiary": {
+    "type": "BANK_ACCOUNT",
+    "entity_type": "COMPANY",
+    "address": {
+      "street_address": "1 Main Street",
+      "country_code": "US",
+      "postcode": "10001",
+      "state": "New York",
+      "city": "New York"
+    },
+    "bank_details": {
+      "bank_name": "JPMorgan Chase Bank, NA",
+      "bank_country_code": "US",
+      "account_name": "poc-s1 Supplier Inc",
+      "account_number": "56999911",
+      "account_currency": "USD",
+      "account_routing_type1": "aba",
+      "account_routing_value1": "021000021",
+      "local_clearing_system": "ACH",
+      "bank_account_category": "Checking"
+    }
+  },
+  "short_reference_id": "P261006-78Z28FP",
+  "status": "SENT",
+  "created_at": "2026-10-06T06:32:05+0000",
+  "updated_at": "2026-10-06T06:32:11+0000",
+  "transfer_method": "LOCAL",
+  "swift_charge_option": "SHARED",
+  "source_currency": "USD",
+  "dispatch_date": "2026-10-06",
+  "remarks": "",
+  "funding": {
+    "status": "FUNDED"
+  }
+}
+06:32:21 SENT 2026-10-06T06:32:11+0000
+06:32:31 SENT 2026-10-06T06:32:11+0000
+06:32:42 SENT 2026-10-06T06:32:11+0000
+06:32:52 SENT 2026-10-06T06:32:11+0000
+06:33:02 SENT 2026-10-06T06:32:11+0000
+06:33:12 SENT 2026-10-06T06:32:11+0000
+06:33:23 SENT 2026-10-06T06:32:11+0000
+06:33:33 SENT 2026-10-06T06:32:11+0000
+06:33:43 SENT 2026-10-06T06:32:11+0000
+06:33:53 SENT 2026-10-06T06:32:11+0000
+06:34:04 SENT 2026-10-06T06:32:11+0000
+06:34:14 SENT 2026-10-06T06:32:11+0000
+=== r1-autosettle-fail :: POST /simulation/transfers/400af553-8f36-4239-9794-fa3907dafc34/transition  
+--- body:
+{"next_status":"FAILED","failure_type":"CLIENT_REQUESTED"}
+
+HTTP 200
+{
+  "request_id": "d7a49936-1d4d-479d-97b9-3820ceda3be8",
+  "id": "400af553-8f36-4239-9794-fa3907dafc34",
+  "transfer_currency": "USD",
+  "transfer_amount": 1,
+  "source_amount": 1,
+  "fee_currency": "USD",
+  "fee_amount": 0,
+  "fee_paid_by": "PAYER",
+  "amount_payer_pays": 1,
+  "amount_beneficiary_receives": 1,
+  "transfer_date": "2026-10-06",
+  "reason": "goods_purchased",
+  "reference": "poc-s1-r1-autosettle-nosettle",
+  "payer": {
+    "entity_type": "COMPANY",
+    "company_name": "Sandbox Business",
+    "address": {
+      "street_address": "18811 Jenkins Tunnel",
+      "country_code": "AU",
+      "postcode": "09193",
+      "state": "Oregon",
+      "city": "McGlynnview"
+    },
+    "additional_info": {
+      "business_registration_type": "COMPANY",
+      "business_registration_number": "X12345678",
+      "business_incorporation_date": "2017-06-03"
+    }
+  },
+  "beneficiary_id": "42d4f893-924a-452a-9a08-f26540994651",
+  "beneficiary": {
+    "type": "BANK_ACCOUNT",
+    "entity_type": "COMPANY",
+    "address": {
+      "street_address": "1 Main Street",
+      "country_code": "US",
+      "postcode": "10001",
+      "state": "New York",
+      "city": "New York"
+    },
+    "bank_details": {
+      "bank_name": "JPMorgan Chase Bank, NA",
+      "bank_country_code": "US",
+      "account_name": "poc-s1 Supplier Inc",
+      "account_number": "56999911",
+      "account_currency": "USD",
+      "account_routing_type1": "aba",
+      "account_routing_value1": "021000021",
+      "local_clearing_system": "ACH",
+      "bank_account_category": "Checking"
+    }
+  },
+  "short_reference_id": "P261006-78Z28FP",
+  "status": "FAILED",
+  "failure_reason": "91002: Client requested",
+  "failure_type": "INCORRECT_ROUTING",
+  "created_at": "2026-10-06T06:32:05+0000",
+  "updated_at": "2026-10-06T06:34:29+0000",
+  "transfer_method": "LOCAL",
+  "swift_charge_option": "SHARED",
+  "source_currency": "USD",
+  "dispatch_date": "2026-10-06",
+  "remarks": "",
+  "funding": {
+    "status": "FUNDED"
+  }
+}

@@ -1,0 +1,6 @@
+Customer order history (synthetic)
+Order ORD-1001 2026-03-02 AUD 210.00 not disputed
+Order ORD-1002 2026-05-14 AUD 340.00 not disputed
+Order ORD-1003 2026-07-30 AUD 125.00 not disputed
+Device fingerprint dfp_7a1c matches all three prior orders
+IP address 203.0.113.24 matches all three prior orders

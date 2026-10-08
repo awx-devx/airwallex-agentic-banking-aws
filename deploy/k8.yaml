@@ -1,0 +1,34 @@
+# Kit 8 (Marketplace Settlement Agent) deploy file for `awx-deploy plan|apply`.
+# From kits/k8_settlement/README.md "Setting up a deployed kit" and DESIGN.md "Operator commands".
+#
+# Variables (the poc-i8-seller-* connected accounts):
+#   K8_ACCT_ALICE, K8_ACCT_BOB, K8_ACCT_CARA   acct_... of poc-i8-seller-alice / -bob / -cara
+# The tenants row of each seller must name the same account the seed checks.
+# After each load_cycle, deposit the cycle's net buyer money (entitlement minus refunds,
+# summed over sellers) into the platform wallet, under `flock /tmp/awx-sandbox.lock`.
+kit: k8
+tenants:
+  - {tenant_id: alice, kit: k8, role: customer, connected_account_id: "${K8_ACCT_ALICE}"}
+  - {tenant_id: bob, kit: k8, role: customer, connected_account_id: "${K8_ACCT_BOB}"}
+  - {tenant_id: cara, kit: k8, role: customer, connected_account_id: "${K8_ACCT_CARA}"}
+steps:
+  - command: seed_seller
+    note: once per seller
+    args: {seller: alice, connected_account_id: "${K8_ACCT_ALICE}", currency: USD,
+           tenure_days: 900, trailing_refund_rate: "0.02"}
+  - command: seed_seller
+    args: {seller: bob, connected_account_id: "${K8_ACCT_BOB}", currency: USD,
+           tenure_days: 200, trailing_refund_rate: "0.03"}
+  - command: seed_seller
+    args: {seller: cara, connected_account_id: "${K8_ACCT_CARA}", currency: USD,
+           tenure_days: 30, trailing_refund_rate: "0.04"}
+  - command: load_cycle
+    note: feed, keyed per cycle_id (the same input again is a no-op)
+    args: {seller: alice, cycle_id: c1, entitlement: {amount: "10000", currency: USD},
+           refunds: {amount: "200", currency: USD}, volume_base: {amount: "10000", currency: USD}}
+  - command: load_cycle
+    args: {seller: bob, cycle_id: c1, entitlement: {amount: "8000", currency: USD},
+           refunds: {amount: "240", currency: USD}, volume_base: {amount: "8000", currency: USD}}
+  - command: load_cycle
+    args: {seller: cara, cycle_id: c1, entitlement: {amount: "5000", currency: USD},
+           refunds: {amount: "200", currency: USD}, volume_base: {amount: "5000", currency: USD}}

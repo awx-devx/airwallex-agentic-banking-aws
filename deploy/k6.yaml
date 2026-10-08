@@ -1,0 +1,15 @@
+# Kit 6 (Multi-Employer Payroll Executor) deploy file for `awx-deploy plan|apply`.
+# Kit 6 has no operator commands: its deploy state is its tenants rows only.
+#
+# Variables:
+#   K6_EMPLOYER_A_ACCT, K6_EMPLOYER_B_ACCT, K6_EMPLOYER_C_ACCT
+#       acct_... of the employers' connected accounts (poc-i6-a, poc-i6-b, poc-i6-c)
+# Root runs (run_payroll) run as k6:operator, the same tenant as its release tool:
+#   awx-deploy trigger k6 run_payroll intent.json --tenant k6:operator
+kit: k6
+tenants:
+  - {tenant_id: "k6:operator", kit: k6, role: operator}
+  - {tenant_id: "k6:employer:a", kit: k6, role: customer, connected_account_id: "${K6_EMPLOYER_A_ACCT}"}
+  - {tenant_id: "k6:employer:b", kit: k6, role: customer, connected_account_id: "${K6_EMPLOYER_B_ACCT}"}
+  - {tenant_id: "k6:employer:c", kit: k6, role: customer, connected_account_id: "${K6_EMPLOYER_C_ACCT}"}
+steps: []
