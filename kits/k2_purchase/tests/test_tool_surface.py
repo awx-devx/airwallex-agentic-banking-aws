@@ -185,7 +185,8 @@ def test_every_propose_tool_maps_to_one_state_machine(world):
 
 def test_read_card_controls_finds_an_issued_card_by_its_purchase_ref(world):
     """After an approved issue_card the agent has only the purchase_ref it proposed; the read
-    returns that card's id (cold run, 8 Oct 2026: the id was only in the execution output)."""
+    returns that card's id (on a fresh deployment on 8 Oct 2026 the id was only in the
+    execution output)."""
     env, h, card_id, test_card = world
     book = env.kit_store.get("book")
     h.store().put("book", dict(book.value), expected_version=None)  # the deployed kit store
@@ -205,8 +206,8 @@ def test_read_card_controls_finds_an_issued_card_by_its_purchase_ref(world):
 
 
 def test_tool_descriptions_say_what_the_terms_hash_is_and_how_to_get_a_test_card():
-    """Cold run, 8 Oct 2026: the agent refused to propose until it got a terms hash nobody had
-    described, and nothing said how to get a limit-test card."""
+    """On a fresh deployment on 8 Oct 2026 the agent refused to propose until it got a terms
+    hash nobody had described, and nothing said how to get a limit-test card."""
     from awx_agent.schema import tool_definition
 
     by_name = {t.name: t for t in TOOLS}
