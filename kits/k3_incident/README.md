@@ -8,11 +8,16 @@ copies every amount from Airwallex's own record, and makes sure one failed trans
 one replacement. The package is pure Python on `awx_common`: no network, no AWS and no model
 calls. [DESIGN.md](DESIGN.md) holds the detailed design notes.
 
-![Kit 3 overview: a requester asks the agent, the agent reads and proposes through the kit's tools, code in AWS Step Functions sets every amount and the approval tier, an approver decides, and only the workflow writes to Airwallex](../../docs/architecture/overview/k3_incident.png)
+![Kit 3 overview: the agent proposes a replacement or a closure, and the mutation adapter writes the replacement transfer.](../../docs/architecture/overview/k3_incident.png)
 
-A requester in the platform tenant asks the agent about a missing payment. The agent reads the transfer and the incident assessment and proposes a replacement, a closure or a simulated failure, and code in AWS Step Functions copies every amount from Airwallex's own record and sets the approval tier. An approver who is not the proposer decides, except that `close_incident` can run AUTO, and only the workflow's mutation adapter writes the replacement transfer and simulated transfer transitions to Airwallex.
+A requester in the platform tenant asks the agent about a missing payment. The agent reads the
+transfer and the incident assessment and proposes a replacement, a closure or a simulated
+failure. Each proposal starts an AWS Step Functions workflow in which code sets the approval
+tier. An approver who is not the proposer decides, except that `close_incident` can run AUTO.
+Only the mutation adapter writes the replacement transfer and simulated transfer transitions to
+Airwallex.
 
-The [detailed reference architecture](../../docs/architecture/k3_incident.png) is below, and [DESIGN.md](DESIGN.md) holds the design notes.
+The detailed reference architecture follows.
 
 ![Kit 3 reference architecture](../../docs/architecture/k3_incident.png)
 

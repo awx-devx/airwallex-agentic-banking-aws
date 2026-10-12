@@ -8,11 +8,17 @@ wallet. This kit prices and funds every employer from its own wallet only: a sho
 blocked and escalated to a person, never funded from another employer, and the others are
 paid.
 
-![Kit 6 overview: a requester asks the agent, the agent reads and proposes through the kit's tools, code in AWS Step Functions sets every amount and the approval tier, an approver decides, and only the workflow writes to Airwallex](../../docs/architecture/overview/k6_payroll.png)
+![Kit 6 overview: the payroll operator proposes a pay run, and a child workflow per employer pays from that employer's wallet.](../../docs/architecture/overview/k6_payroll.png)
 
-The payroll operator (tenant `k6:operator`) asks the agent to run a pay period, or an operator starts `run_payroll` with `awx-deploy trigger`. The root AWS Step Functions workflow starts one child workflow per employer in that employer's tenant, and a child runs AUTO only when its own wallet funds it. An approver in the operator tenant who is not the proposer decides the root proposal, `lock_rates` can run AUTO, and only the children write beneficiaries, quotes, conversions, payouts and the platform fee to Airwallex, through the mutation adapter.
+The payroll operator (tenant `k6:operator`) asks the agent to run a pay period, or a deployment
+operator starts `run_payroll` with `awx-deploy trigger`. The root AWS Step Functions workflow
+starts one child workflow per employer in that employer's tenant. A payroll child runs AUTO only
+when its own wallet funds it. An approver in the payroll operator tenant who is not the proposer
+decides the root proposal, and `lock_rates` can run AUTO. Only the child workflows write to
+Airwallex, through the mutation adapter: beneficiaries, quotes, conversions, payouts, simulated
+transfer transitions and the platform fee.
 
-The [detailed reference architecture](../../docs/architecture/k6_payroll.png) is below, and [DESIGN.md](DESIGN.md) holds the design notes.
+The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
 
 ![Kit 6 reference architecture](../../docs/architecture/k6_payroll.png)
 

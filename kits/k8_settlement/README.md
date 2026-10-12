@@ -9,11 +9,18 @@ kit keeps a per-seller reserve ledger whose identities balance on every posting,
 seller through a connected account transfer, turns any shortfall into a receivable, and
 collects it with a separate, always-approved charge only when the seller's wallet can cover it.
 
-![Kit 8 overview: a requester asks the agent, the agent reads and proposes through the kit's tools, code in AWS Step Functions sets every amount and the approval tier, an approver decides, and only the workflow writes to Airwallex](../../docs/architecture/overview/k8_settlement.png)
+![Kit 8 overview: the agent proposes settlement actions, the kit 8 operator approves payouts, and the adapter pays each seller.](../../docs/architecture/overview/k8_settlement.png)
 
-A requester in a seller's tenant asks the agent, which reads that seller's balance, ledger and carrier events and proposes settlement, reserve, recovery and reconciliation actions. Code in AWS Step Functions sets every reserve, payout and charge amount and the approval tier. The kit 8 operator decides payouts, reserve changes and in-flight money, the seller's approver decides `recover_shortfall`, `reconcile_seller_money` can run AUTO, an operator starts the scheduled settlement and reconciliation with `awx-deploy trigger`, and only the workflow's mutation adapter writes to Airwallex.
+A requester in a seller's tenant asks the agent, which reads that seller's balance, ledger and
+carrier events and proposes settlement, reserve, recovery and reconciliation actions. Code in
+AWS Step Functions sets every reserve, payout and charge amount and the approval tier. An
+approver in the kit 8 operator tenant (`k8:operator`) decides payouts, reserve changes and
+in-flight money, and the seller's approver decides `recover_shortfall`. The proposer never
+approves their own proposal. `reconcile_seller_money` can run AUTO. A deployment operator starts
+the scheduled settlement and reconciliation with `awx-deploy trigger`. Only the mutation adapter
+writes to Airwallex.
 
-The [detailed reference architecture](../../docs/architecture/k8_settlement.png) is below, and [DESIGN.md](DESIGN.md) holds the design notes.
+The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
 
 ![Kit 8 reference architecture](../../docs/architecture/k8_settlement.png)
 

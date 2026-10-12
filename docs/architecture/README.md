@@ -34,12 +34,15 @@ python3.12 docs/architecture/generate.py --drawio /path/to/drawio
 ```
 
 Without `--drawio` the script writes only the `.drawio` files. `--only spine k6_payroll` limits
-the run to the named diagrams; the overviews are named with their folder, for example
-`--only overview/all-kits overview/k4_dispute`. The overviews in `overview/` use larger type, no
-notes panel and no step numbers: each edge carries a short label instead, and the lane titles
-say what each lane may do. They go through the same layout checks. When no display is set, the script runs draw.io under
-`xvfb-run`. Generation fails if an edge crosses a node, two edges overlap, or a node label is
-longer than three lines.
+the run to the named diagrams. Name an overview with its folder, for example
+`--only overview/all-kits overview/k4_dispute`. When no display is set, the script runs draw.io
+under `xvfb-run`. Generation fails if an edge crosses a node, two edges overlap, or a node label
+is longer than three lines.
+
+The overviews in `overview/` use larger type, no notes panel and no step numbers: each edge
+carries a short label instead, and the lane titles say what each lane does. Each overview edge
+follows an explicit route. Generation also fails if an overview edge label leaves its lane, an
+edge runs through a lane title, or edges run side by side closer than 18 pixels.
 
 The PNGs in this directory were rendered with draw.io desktop 31.7.0 for Linux arm64 (the
 `drawio-arm64-31.7.0.AppImage` release asset, SHA-256 checked against the release's
@@ -51,9 +54,9 @@ xvfb-run -a drawio --no-sandbox --disable-gpu -x -f png -s 2 -b 20 -o out.png in
 ```
 
 `optimise_pngs.py` then converts each PNG here and in `overview/` (or only the paths it is given)
-to a 256-colour palette in place, which keeps them
-at about 500 KB each with no visible change (the diagrams use flat colours). `make diagrams
-DRAWIO=/path/to/drawio` runs the generator and the optimiser.
+to a 256-colour palette in place, which keeps them at about 500 KB each with no visible change
+(the diagrams use flat colours). `make diagrams DRAWIO=/path/to/drawio` runs the generator and
+the optimiser.
 
 ## Icons
 
