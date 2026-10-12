@@ -5,7 +5,11 @@ AWS-native reference implementations of kits 1 to 8 from the
 one shared spine. Every kit runs against the Airwallex sandbox only. This is a proof of concept,
 not production code.
 
-![Architecture](docs/architecture/spine.png)
+## Architecture overview
+
+![Kits 1 to 8 on the shared spine: people sign in with Amazon Cognito and chat with the agent on Amazon Bedrock AgentCore Runtime, which calls each kit's read and propose tools through AgentCore Gateway. Kits 1 to 4 use the platform's own Airwallex account and kits 5 to 8 use customers' connected accounts. AWS Step Functions workflows set every amount and approval tier, approvers decide, and only the mutation adapter writes to Airwallex](docs/architecture/overview/all-kits.png)
+
+The agent reads and proposes through each kit's tools, and code in AWS Step Functions sets every amount and the approval tier. People approve through the approval application programming interface (API), and only the workflow's mutation adapter writes to Airwallex. The AWS Cloud Development Kit (CDK) app in `infra/` synthesises the AWS CloudFormation templates the kits deploy with (`make synth`), and [docs/deployment.md](docs/deployment.md) walks through the deployment. The [reference architecture diagrams](docs/architecture/README.md) show the shared spine and each kit in detail.
 
 ## Kits
 

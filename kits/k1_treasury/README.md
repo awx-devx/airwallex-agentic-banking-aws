@@ -9,6 +9,12 @@ arrives, only the supplier decision changes. The same conversion runs without a 
 and invoice data support the receipt forecast, and needs a person when a customer email
 contradicts it.
 
+![Kit 1 overview: a requester asks the agent, the agent reads and proposes through the kit's tools, code in AWS Step Functions sets every amount and the approval tier, an approver decides, and only the workflow writes to Airwallex](../../docs/architecture/overview/k1_treasury.png)
+
+A requester in the platform tenant asks the agent, which reads balances, obligations, rates and the treasury plan and proposes a rate lock, a plan execution or an obligation release. Each proposal starts an AWS Step Functions workflow in which code sets every amount and the approval tier. An approver who is not the proposer decides, except that `lock_rate` and `execute_plan` can run AUTO within the policy's limits, and only the workflow's mutation adapter writes foreign exchange quotes, conversions and transfers to Airwallex.
+
+The [detailed reference architecture](../../docs/architecture/k1_treasury.png) is below, and [DESIGN.md](DESIGN.md) holds the design notes.
+
 ![Kit 1 reference architecture](../../docs/architecture/k1_treasury.png)
 
 The diagram source is `docs/architecture/k1_treasury.drawio`.

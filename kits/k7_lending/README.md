@@ -10,6 +10,12 @@ movements it sent. The guide does not specify the loan subledger, the repayment 
 reconciliation, so those are AWS-authored assumptions, labelled as such here and in
 [DESIGN.md](DESIGN.md).
 
+![Kit 7 overview: a requester asks the agent, the agent reads and proposes through the kit's tools, code in AWS Step Functions sets every amount and the approval tier, an approver decides, and only the workflow writes to Airwallex](../../docs/architecture/overview/k7_lending.png)
+
+A requester in a borrower's tenant asks the agent, which reads the borrower's position and the weekly collection preview and proposes a collection or an advance. Code in AWS Step Functions computes every repayment and tranche and sets the approval tier. The kit 7 operator decides every `disburse_advance`, the borrower's approver decides a collection the model starts, `reconcile_portfolio` can run AUTO, an operator starts the scheduled collection and reconciliation with `awx-deploy trigger`, and only the workflow's mutation adapter writes to Airwallex.
+
+The [detailed reference architecture](../../docs/architecture/k7_lending.png) is below, and [DESIGN.md](DESIGN.md) holds the design notes.
+
 ![Kit 7 reference architecture](../../docs/architecture/k7_lending.png)
 
 The diagram source is `docs/architecture/k7_lending.drawio`.
