@@ -30,6 +30,12 @@ def op(body=None, request_id=None) -> Operation:
     )
 
 
+def _fixed_now() -> datetime:
+    """The store's clock. An executor in the same test must share it: against the real clock,
+    a first attempt stamped with this date ages past the dedupe margin and changes the result."""
+    return datetime(2026, 10, 6, tzinfo=UTC)
+
+
 @pytest.fixture
 def store():
     with mock_aws():
@@ -40,9 +46,7 @@ def store():
             AttributeDefinitions=[{"AttributeName": "request_id", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
-        yield DynamoDbOperationStore(
-            "ops", client=db, clock=lambda: datetime(2026, 10, 6, tzinfo=UTC)
-        )
+        yield DynamoDbOperationStore("ops", client=db, clock=_fixed_now)
 
 
 def test_begin_writes_pending_before_the_call(store):
@@ -127,7 +131,7 @@ def test_a_retryable_failure_is_overwritten_by_a_later_success(store):
             return {"items": []}
 
     port = Port()
-    executor = MutationExecutor(port, store, sleep=lambda s: None)
+    executor = MutationExecutor(port, store, sleep=lambda s: None, clock=_fixed_now)
     assert executor.run(op()).status is OperationStatus.SUCCEEDED
     assert store.get(op().request_id).status == "SUCCEEDED"
     assert executor.run(op()).status is OperationStatus.SUCCEEDED
@@ -181,7 +185,7 @@ class _Port:
 
 def _rate_limited_then_crashed(store, op):
     port = _Port()
-    executor = MutationExecutor(port, store, sleep=lambda s: None, max_attempts=1)
+    executor = MutationExecutor(port, store, sleep=lambda s: None, max_attempts=1, clock=_fixed_now)
     assert executor.run(op).status is OperationStatus.FAILED  # the 429
     with pytest.raises(RuntimeError):
         executor.run(op)  # the resend leaves and the process dies
@@ -209,7 +213,9 @@ def test_429_then_crash_on_a_non_deduplicating_endpoint_is_never_resent(store):
         intent_hash=HASH,
     )
     port = _rate_limited_then_crashed(store, op)
-    later = MutationExecutor(port, store, sleep=lambda s: None, max_attempts=1)  # M1 re-emit
+    later = MutationExecutor(
+        port, store, sleep=lambda s: None, max_attempts=1, clock=_fixed_now
+    )  # M1 re-emit
     result = later.run(op)
     assert result.status is OperationStatus.OUTCOME_UNKNOWN
     assert port.sends == 2  # nothing sent by the later run
@@ -222,7 +228,7 @@ def test_429_then_crash_on_a_deduplicating_endpoint_reads_back_before_any_resend
         "transfer_currency": "AUD",
     }
     port = _rate_limited_then_crashed(store, op(body=body))
-    later = MutationExecutor(port, store, sleep=lambda s: None, max_attempts=1)
+    later = MutationExecutor(port, store, sleep=lambda s: None, max_attempts=1, clock=_fixed_now)
     result = later.run(op(body=body))
     assert port.reads >= 1
     assert port.sends == 2  # the read-back found the landed write; no resend
@@ -333,9 +339,13 @@ def test_executor_on_dynamodb_turns_a_refused_resend_into_unknown(store):
         )
 
     port = Port([_unknown, refused])
-    first = MutationExecutor(port, store, sleep=lambda s: None, max_attempts=1).run(o)
+    first = MutationExecutor(
+        port, store, sleep=lambda s: None, max_attempts=1, clock=_fixed_now
+    ).run(o)
     assert first.status is OperationStatus.OUTCOME_UNKNOWN
-    second = MutationExecutor(port, store, sleep=lambda s: None, max_attempts=1).run(o)
+    second = MutationExecutor(
+        port, store, sleep=lambda s: None, max_attempts=1, clock=_fixed_now
+    ).run(o)
     assert second.status is OperationStatus.OUTCOME_UNKNOWN
     assert second.body["refused"]["error_code"] == "balance_insufficient"
     rec = store.get(o.request_id)
