@@ -7,6 +7,18 @@ is sent to Airwallex. This kit does that: the agent reads JPG and PDF evidence a
 accept, a challenge or a referral, and deterministic code decides the economics, the deadline,
 whether the evidence meets the minimum, and who must approve.
 
+![Kit 4 overview: an operator uploads evidence to Amazon S3, and the mutation adapter files challenges and acceptances.](../../docs/architecture/overview/k4_dispute.png)
+
+An operator uploads each evidence file through an AWS Lambda function that stores it in Amazon
+S3. A requester in the platform tenant asks the agent, which reads the dispute queue, disputes,
+economics and refunds and proposes a response. Code in AWS Step Functions decides the economics,
+the deadline and the approval tier. An approver in the platform tenant decides, except that
+`refer_dispute` and `close_dispute` can run AUTO. The proposer never approves their own
+proposal. Only the mutation adapter writes to Airwallex: it reads the evidence file from Amazon
+S3, uploads it and sends a challenge or an acceptance.
+
+The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
+
 ![Kit 4 reference architecture](../../docs/architecture/k4_dispute.png)
 
 The diagram source is `docs/architecture/k4_dispute.drawio`.

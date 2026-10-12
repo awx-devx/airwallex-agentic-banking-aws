@@ -7,6 +7,18 @@ scarce and a reserve floor binds, so this kit rations it in code: a capital ledg
 deterministic allocator, card issuing under platform-defined programs, fee and repayment
 charges, and server-side tenant binding so one customer can never reach another's account.
 
+![Kit 5 overview: the agent proposes card, bridge and fee actions, and the mutation adapter writes on the connected account.](../../docs/architecture/overview/k5_platform_spend.png)
+
+A requester in a customer's tenant asks the agent, which reads that tenant's summary, cards,
+card transactions and bridge position and proposes card, shortfall, bridge, fee and repayment
+actions. Code in AWS Step Functions sets every amount, the tenant's connected account and the
+approval tier. An approver in the customer's tenant decides most actions, and an approver in the
+kit 5 operator tenant (`k5:operator`) decides `bridge_shortfall`. The proposer never approves
+their own proposal. `register_shortfall` and `reconcile_bridge` can run AUTO. Only the mutation
+adapter writes to Airwallex, naming the customer's connected account.
+
+The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
+
 ![Kit 5 reference architecture](../../docs/architecture/k5_platform_spend.png)
 
 The diagram source is `docs/architecture/k5_platform_spend.drawio`.

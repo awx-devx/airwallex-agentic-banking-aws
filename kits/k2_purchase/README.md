@@ -7,6 +7,18 @@ reconsider, and issues an Airwallex virtual card whose controls enforce exactly 
 Only card controls can block an authorisation, so the policy lives in the controls, not in a
 prompt. The package is `awx-k2-purchase` (import `awx_k2_purchase`).
 
+![Kit 2 overview: the agent proposes card actions, and the mutation adapter writes cardholders, cards and card changes.](../../docs/architecture/overview/k2_purchase.png)
+
+A requester in the platform tenant asks the agent about a purchase. The agent reads the purchase
+plan, card controls and card transactions and proposes card actions. Each proposal starts an AWS
+Step Functions workflow in which code sets every card limit and the approval tier. An approver
+in the platform tenant decides, except that `update_card_controls` and `freeze_card` can run
+AUTO when they only tighten a card. The proposer never approves their own proposal. Only the
+mutation adapter writes cardholders, cards, card updates and simulated authorisations to
+Airwallex.
+
+The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
+
 ![Kit 2 reference architecture](../../docs/architecture/k2_purchase.png)
 
 The diagram source is `docs/architecture/k2_purchase.drawio`.

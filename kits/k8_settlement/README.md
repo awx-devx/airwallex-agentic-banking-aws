@@ -9,6 +9,19 @@ kit keeps a per-seller reserve ledger whose identities balance on every posting,
 seller through a connected account transfer, turns any shortfall into a receivable, and
 collects it with a separate, always-approved charge only when the seller's wallet can cover it.
 
+![Kit 8 overview: an approver in the kit 8 operator tenant approves payouts, and the mutation adapter pays each seller.](../../docs/architecture/overview/k8_settlement.png)
+
+A requester in a seller's tenant asks the agent, which reads that seller's balance, ledger and
+carrier events and proposes settlement, reserve, recovery and reconciliation actions. Code in
+AWS Step Functions sets every reserve, payout and charge amount and the approval tier. An
+approver in the kit 8 operator tenant (`k8:operator`) decides payouts, reserve changes and
+in-flight money, and an approver in the seller's tenant decides `recover_shortfall`. The
+proposer never approves their own proposal. `reconcile_seller_money` can run AUTO. A deployment
+operator starts the scheduled settlement and reconciliation with `awx-deploy trigger`. Only the
+mutation adapter writes to Airwallex.
+
+The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
+
 ![Kit 8 reference architecture](../../docs/architecture/k8_settlement.png)
 
 The diagram source is `docs/architecture/k8_settlement.drawio`.

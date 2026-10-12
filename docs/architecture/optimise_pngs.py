@@ -3,9 +3,10 @@
 draw.io renders each diagram at scale 2 as a 24-bit PNG of about 1.2 MB. The diagrams use flat
 colours, so a 256-colour palette is visually identical and about a third of the size.
 
-Run after `generate.py --drawio ...` (the `make diagrams` target does both):
+Run after `generate.py --drawio ...` (the `make diagrams` target does both). With no arguments
+it shrinks every PNG here and in `overview/`; given paths, only those:
 
-    uv run --no-project --with pillow==12.3.0 python docs/architecture/optimise_pngs.py
+    uv run --no-project --with pillow==12.3.0 python docs/architecture/optimise_pngs.py [PNG ...]
 """
 
 from __future__ import annotations
@@ -29,12 +30,17 @@ def optimise(path: Path) -> tuple[int, int]:
     return before, path.stat().st_size
 
 
-def main() -> int:
-    for path in sorted(HERE.glob("*.png")):
+def main(argv: list[str]) -> int:
+    """Every PNG here and in overview/, or only the paths given."""
+    paths = [Path(a).resolve() for a in argv] or [
+        *sorted(HERE.glob("*.png")),
+        *sorted((HERE / "overview").glob("*.png")),
+    ]
+    for path in paths:
         before, after = optimise(path)
-        print(f"{path.name}: {before // 1024} KB -> {after // 1024} KB")
+        print(f"{path.relative_to(HERE)}: {before // 1024} KB -> {after // 1024} KB")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
