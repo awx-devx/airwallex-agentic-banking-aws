@@ -8,15 +8,15 @@ wallet. This kit prices and funds every employer from its own wallet only: a sho
 blocked and escalated to a person, never funded from another employer, and the others are
 paid.
 
-![Kit 6 overview: the payroll operator proposes a pay run, and a child workflow per employer pays from that employer's wallet.](../../docs/architecture/overview/k6_payroll.png)
+![Kit 6 overview: the payroll operator asks for a pay run, and a child workflow per employer pays from that employer's wallet.](../../docs/architecture/overview/k6_payroll.png)
 
 The payroll operator (tenant `k6:operator`) asks the agent to run a pay period, or a deployment
 operator starts `run_payroll` with `awx-deploy trigger`. The root AWS Step Functions workflow
-starts one child workflow per employer in that employer's tenant. A payroll child runs AUTO only
-when its own wallet funds it. An approver in the payroll operator tenant who is not the proposer
-decides the root proposal, and `lock_rates` can run AUTO. Only the child workflows write to
-Airwallex, through the mutation adapter: beneficiaries, quotes, conversions, payouts, simulated
-transfer transitions and the platform fee.
+starts one child workflow per employer in that employer's tenant. A payroll child workflow runs
+AUTO only when its own wallet funds it. An approver in the payroll operator tenant decides the
+root proposal, and `lock_rates` can run AUTO. The proposer never approves their own proposal.
+Only the child workflows write to Airwallex. They write beneficiaries, quotes, conversions,
+payouts, simulated transfer transitions and the platform fee through the mutation adapter.
 
 The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
 

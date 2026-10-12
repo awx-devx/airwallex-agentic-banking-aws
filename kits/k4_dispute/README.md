@@ -12,9 +12,10 @@ whether the evidence meets the minimum, and who must approve.
 An operator uploads each evidence file through an AWS Lambda function that stores it in Amazon
 S3. A requester in the platform tenant asks the agent, which reads the dispute queue, disputes,
 economics and refunds and proposes a response. Code in AWS Step Functions decides the economics,
-the deadline and the approval tier. An approver who is not the proposer decides, except that
-`refer_dispute` and `close_dispute` can run AUTO. Only the mutation adapter writes to Airwallex:
-it reads the evidence file from Amazon S3, uploads it and sends a challenge or an acceptance.
+the deadline and the approval tier. An approver in the platform tenant decides, except that
+`refer_dispute` and `close_dispute` can run AUTO. The proposer never approves their own
+proposal. Only the mutation adapter writes to Airwallex: it reads the evidence file from Amazon
+S3, uploads it and sends a challenge or an acceptance.
 
 The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
 

@@ -7,16 +7,16 @@ not production code.
 
 ## Architecture overview
 
-![Kits 1 to 8 on the shared spine: the agent proposes, AWS Step Functions sets amounts and approvals, the adapter writes.](docs/architecture/overview/all-kits.png)
+![Kits 1 to 8 and the shared spine: the agent proposes, AWS Step Functions sets amounts and approval tiers, the adapter writes.](docs/architecture/overview/all-kits.png)
 
 The shared spine is the sign-in, agent, approval, workflow and adapter infrastructure that every
 kit uses. The agent reads and proposes through each kit's tools, and code in AWS Step Functions
 sets every amount and the approval tier. People approve through the approval application
 programming interface (API), and only the mutation adapter writes to Airwallex. The AWS Cloud
-Development Kit (CDK) app in `infra/` synthesises the AWS CloudFormation templates for the
-spine, the agent and each kit (`make synth`). [docs/deployment.md](docs/deployment.md) walks
-through the deployment. The [reference architecture diagrams](docs/architecture/README.md) show
-the shared spine and each kit in detail.
+Development Kit (CDK) app in `infra/` synthesises the AWS CloudFormation templates for the spine
+stack, the agent stack and each kit (`make synth`). [docs/deployment.md](docs/deployment.md)
+walks through the deployment. The [reference architecture diagrams](docs/architecture/README.md)
+show the shared spine and each kit in detail.
 
 ## Kits
 

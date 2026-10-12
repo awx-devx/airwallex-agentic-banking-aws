@@ -8,14 +8,14 @@ copies every amount from Airwallex's own record, and makes sure one failed trans
 one replacement. The package is pure Python on `awx_common`: no network, no AWS and no model
 calls. [DESIGN.md](DESIGN.md) holds the detailed design notes.
 
-![Kit 3 overview: the agent proposes a replacement or a closure, and the mutation adapter writes the replacement transfer.](../../docs/architecture/overview/k3_incident.png)
+![Kit 3 overview: the agent proposes a replacement, and the mutation adapter writes it and simulated transfer transitions.](../../docs/architecture/overview/k3_incident.png)
 
 A requester in the platform tenant asks the agent about a missing payment. The agent reads the
 transfer and the incident assessment and proposes a replacement, a closure or a simulated
 failure. Each proposal starts an AWS Step Functions workflow in which code sets the approval
-tier. An approver who is not the proposer decides, except that `close_incident` can run AUTO.
-Only the mutation adapter writes the replacement transfer and simulated transfer transitions to
-Airwallex.
+tier. An approver in the platform tenant decides, except that `close_incident` can run AUTO. The
+proposer never approves their own proposal. Only the mutation adapter writes the replacement
+transfer and simulated transfer transitions to Airwallex.
 
 The detailed reference architecture follows.
 

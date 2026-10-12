@@ -7,7 +7,7 @@ scarce and a reserve floor binds, so this kit rations it in code: a capital ledg
 deterministic allocator, card issuing under platform-defined programs, fee and repayment
 charges, and server-side tenant binding so one customer can never reach another's account.
 
-![Kit 5 overview: the agent proposes card, bridge and fee actions, and the adapter writes on the customer's connected account.](../../docs/architecture/overview/k5_platform_spend.png)
+![Kit 5 overview: the agent proposes card, bridge and fee actions, and the mutation adapter writes on the connected account.](../../docs/architecture/overview/k5_platform_spend.png)
 
 A requester in a customer's tenant asks the agent, which reads that tenant's summary, cards,
 card transactions and bridge position and proposes card, shortfall, bridge, fee and repayment

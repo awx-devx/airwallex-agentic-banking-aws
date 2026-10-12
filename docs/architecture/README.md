@@ -43,6 +43,9 @@ The overviews in `overview/` use larger type, no notes panel and no step numbers
 carries a short label instead, and the lane titles say what each lane does. Each overview edge
 follows an explicit route. Generation also fails if an overview edge label leaves its lane, an
 edge runs through a lane title, or edges run side by side closer than 18 pixels.
+In the overviews, reads are black solid and dashed lines mark the deployment operator's trigger
+and kit 4's evidence path. The adapter's read of the evidence file is orange because it feeds
+the upload write.
 
 The PNGs in this directory were rendered with draw.io desktop 31.7.0 for Linux arm64 (the
 `drawio-arm64-31.7.0.AppImage` release asset, SHA-256 checked against the release's

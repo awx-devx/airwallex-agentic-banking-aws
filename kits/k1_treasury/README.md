@@ -14,9 +14,10 @@ contradicts it.
 A requester in the platform tenant asks the agent, which reads balances, obligations, rates and
 the treasury plan and proposes a rate lock, a plan execution or an obligation release. Each
 proposal starts an AWS Step Functions workflow in which code sets every amount and the approval
-tier. An approver who is not the proposer decides, except that `lock_rate` and `execute_plan`
-can run AUTO within the policy's limits. Only the mutation adapter writes foreign exchange
-quotes, conversions, transfers and simulated transfer transitions to Airwallex.
+tier. An approver in the platform tenant decides, except that `lock_rate` and `execute_plan` can
+run AUTO within the policy's limits. The proposer never approves their own proposal. Only the
+mutation adapter writes foreign exchange quotes, conversions, transfers and simulated transfer
+transitions to Airwallex.
 
 The detailed reference architecture follows, and [DESIGN.md](DESIGN.md) holds the design notes.
 

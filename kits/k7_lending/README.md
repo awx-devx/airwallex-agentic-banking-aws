@@ -10,16 +10,17 @@ movements it sent. The guide does not specify the loan subledger, the repayment 
 reconciliation, so those are AWS-authored assumptions, labelled as such here and in
 [DESIGN.md](DESIGN.md).
 
-![Kit 7 overview: the agent proposes collections and advances, and the mutation adapter writes them on the borrower's account.](../../docs/architecture/overview/k7_lending.png)
+![Kit 7 overview: the agent proposes collections and advances, and the mutation adapter writes them on the connected account.](../../docs/architecture/overview/k7_lending.png)
 
 A requester in a borrower's tenant asks the agent, which reads the borrower's position and the
-weekly collection preview and proposes a collection or an advance. The portfolio read and
-`reconcile_portfolio` run in the platform tenant only. Code in AWS Step Functions computes every
-repayment and tranche and sets the approval tier. An approver in the kit 7 operator tenant
-(`k7:operator`) decides every `disburse_advance`, and the borrower's approver decides a
-collection the model starts. The proposer never approves their own proposal.
-`reconcile_portfolio` can run AUTO. A deployment operator starts the scheduled collection and
-reconciliation with `awx-deploy trigger`. Only the mutation adapter writes to Airwallex.
+weekly collection preview and proposes a collection or an advance. Code in AWS Step Functions
+computes every repayment and tranche and sets the approval tier. An approver in the kit 7
+operator tenant (`k7:operator`) decides every `disburse_advance`, and an approver in the
+borrower's tenant decides a collection the model starts. The proposer never approves their own
+proposal. `reconcile_portfolio` can run AUTO. `read_portfolio_position` and
+`reconcile_portfolio` run in the platform tenant only. A deployment operator starts the
+scheduled collection and reconciliation with `awx-deploy trigger`. Only the mutation adapter
+writes to Airwallex.
 
 The detailed reference architecture follows.
 

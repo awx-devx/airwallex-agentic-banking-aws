@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -241,9 +242,10 @@ class Page:
                 f'height="{ih}" as="geometry"/></mxCell>'
             )
             size = "" if g.font == 11 else f"fontSize={g.font};"
-            self.text(
-                lx, ly, lw, lh, escape(label), "align=center;verticalAlign=top;spacing=0;" + size
-            )
+            html = escape(label)
+            if g is not DETAIL:  # overviews: never break a line inside a hyphenated name
+                html = re.sub(r"(\S*\w-\w\S*)", r"<span style='white-space:nowrap'>\1</span>", html)
+            self.text(lx, ly, lw, lh, html, "align=center;verticalAlign=top;spacing=0;" + size)
         self.nodes[key] = nd
 
     # ---------------------------------------------------------------- routing
@@ -375,7 +377,7 @@ class Page:
     def _label(self, name, path, text, color, prefer=None) -> None:
         """A step number on its edge, placed where it overlaps no node, no other label and no
         other edge. An overview edge (`prefer` given, possibly empty) must touch no other edge
-        and tries its preferred segments first."""
+        and tries its preferred segments, or segment positions, first."""
         if not text:  # an overview edge drawn without a label
             return
         g = self.geo
@@ -383,9 +385,15 @@ class Page:
         segs = sorted(
             pairwise(path), key=lambda ab: -abs(ab[0][0] - ab[1][0]) - abs(ab[0][1] - ab[1][1])
         )
-        if prefer is not None:
-            first = [s for i, s in enumerate(pairwise(path)) if i in prefer]
-            segs = first + [s for s in segs if s not in first]
+        fracs = (0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9)
+        tries = [(a, b, fracs) for a, b in segs]
+        if prefer is not None:  # an entry is a segment index, or (index, fraction) to try first
+            edge_segs = list(pairwise(path))
+            first = [
+                (*edge_segs[i[0]], (i[1],)) if isinstance(i, tuple) else (*edge_segs[i], fracs)
+                for i in prefer
+            ]
+            tries = first + tries
         blocked = [_grow(r, 4) for nd in self.nodes.values() for r in nd.rects()] + self.label_rects
         others = [(a, b) for n2, a, b in self.segments if n2 != name]
 
@@ -395,8 +403,8 @@ class Page:
         # First choice: touch no other edge. Second: cross other edges only at right angles.
         # Last: avoid only nodes and labels.
         for strict in (True,) if prefer is not None else (True, False, None):
-            for a, b in segs:
-                for f in (0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9):
+            for a, b, fs in tries:
+                for f in fs:
                     cx, cy = a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f
                     r = (cx - w / 2, cy - h / 2, w, h)
                     if any(_overlap(r, o, 2) for o in blocked):
@@ -1704,7 +1712,7 @@ OVERVIEW = Geo(
 )
 ALL_KITS = Geo(
     cx=[150, 430, 730, 1040, 1300],
-    ry=[190, 420, 702, 970, 1190],
+    ry=[190, 420, 716, 1018, 1230],
     icon=56,
     label_w=230,
     label_h=62,
@@ -1837,7 +1845,7 @@ def overview_page(o: Overview) -> Page:
     slug = o.kit.slug
     k4, k6 = slug.startswith("k4"), slug.startswith("k6")
     p = Page(f"overview/{slug}", o.title, height=1000, geo=OVERVIEW)
-    p.node("user", "user", 0, 0, o.requester, lw=320)
+    p.node("user", "user", 0, 0, o.requester, lw=340)
     p.node("approver", "user", 1, 0, o.approver, lw=420)
     p.node(
         "agent",
@@ -1857,11 +1865,11 @@ def overview_page(o: Overview) -> Page:
     p.node("sfn", "sfn", 0, 2, "AWS Step Functions: " + ", ".join(o.actions))
     p.node("adapter", "lambda", 0, 3, "Mutation adapter (AWS Lambda): the only Airwallex writer")
     account = "" if o.connected else ", platform account"
-    p.node("awx", "ext", 1, 3, f"Airwallex sandbox{account}. Writes {o.writes}", w=380)
+    p.node("awx", "ext", 1, 3, f"Airwallex sandbox{account}: {o.writes}", w=380)
     if o.connected:
         p.node("accounts", "ext", 2, 3, o.connected, w=220)
     if o.operator:
-        p.node("op", "user", 2, 0, o.operator)
+        p.node("op", "user", 2, 0, f"{o.operator}. {SCHEDULED}", lw=440)
     if k4:
         p.node("op", "user", 2, 0, "Operator who uploads each evidence file")
         p.node("upload", "lambda", 2, 2, "Evidence upload Lambda: types, hashes and indexes a file")
@@ -1872,8 +1880,8 @@ def overview_page(o: Overview) -> Page:
             "sfn",
             2,
             2,
-            "One child workflow per employer, in that employer's tenant. A payroll child runs "
-            "AUTO only when its own wallet funds it",
+            "One child workflow per employer, in that employer's tenant. A payroll child workflow "
+            "runs AUTO only when its own wallet funds it",
         )
 
     p.wire("user", "agent", "asks", ("R", 0.5), ("R", 1 / 6), [(405, 180), (405, 380)], prefer=[0])
@@ -1997,6 +2005,8 @@ def overview_page(o: Overview) -> Page:
 
 KIT = {k.slug: k for k in KITS}
 PLATFORM_REQUESTER = "Requester in the platform tenant, using the awxpoc command line"
+# deploy.py TRIGGERED_BY: the proposer on record for every run awx-deploy trigger starts
+SCHEDULED = "Scheduled runs are recorded as proposed by awx-deploy:schedule."
 PLATFORM_APPROVER = "Approver in the platform tenant."
 
 OVERVIEWS = [
@@ -2059,7 +2069,7 @@ OVERVIEWS = [
         KIT["k7_lending"],
         "Kit 7: Portfolio Lending Agent",
         "Portfolio Lending Agent",
-        "Requester in a borrower's tenant, or the platform tenant for portfolio reads and "
+        "Requester in a borrower's tenant, or in the platform tenant for portfolio reads and "
         "reconciliation, using the awxpoc command line",
         "Approver in the borrower's tenant, or in the kit 7 operator tenant (k7:operator) for "
         "disburse_advance. reconcile_portfolio can run AUTO",
@@ -2086,7 +2096,7 @@ OVERVIEWS = [
 def group(p: Page, key: str, xc: float, title: str, kits: list[Overview]) -> None:
     """A kit group on the all-kits page: one box with a card per kit, centred at x `xc` in the
     kits lane. Edges route to the group, never to a card."""
-    w, h = 600, 272
+    w, h = 600, 300
     nd = Node(key, "group", 0, 2, title, cid=p._id("n"), geo=p.geo, w=w, h=h, xc=xc)
     x, y = nd.x - w / 2, nd.y - h / 2
     p.cells.append(
@@ -2096,10 +2106,10 @@ def group(p: Page, key: str, xc: float, title: str, kits: list[Overview]) -> Non
         f'fontColor=#232F3E;" vertex="1" parent="1"><mxGeometry x="{x}" y="{y}" width="{w}" '
         f'height="{h}" as="geometry"/></mxCell>'
     )
-    cw, ch = 286, 110
+    cw, ch = 286, 124
     for i, o in enumerate(kits):
         cx, cy = x + 10 + (i % 2) * (cw + 8), y + 34 + (i // 2) * (ch + 8)
-        html = f"<b>Kit {o.n}: {escape(o.name)}</b><br>Writes {escape(o.writes)}"
+        html = f"<b>Kit {o.n}: {escape(o.name)}</b><br>Airwallex writes: {escape(o.writes)}"
         p.cells.append(
             f'<mxCell id="{p._id("c")}" value="{escape(html)}" style="rounded=1;arcSize=6;'
             "whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E7157B;verticalAlign=middle;"
@@ -2112,11 +2122,11 @@ def group(p: Page, key: str, xc: float, title: str, kits: list[Overview]) -> Non
 
 def all_kits_page() -> Page:
     """The spine once, with kits 1 to 8 as cards in their tenancy group. Columns: x 150, 430,
-    730, 1040 and 1300; rows: y 190, 420, 702, 970 and 1190. Every edge has an explicit route."""
+    730, 1040 and 1300; rows: y 190, 420, 716, 1018 and 1230. Every edge has an explicit route."""
     p = Page(
         "overview/all-kits",
         "Airwallex Agentic Banking on AWS: kits 1 to 8 and the shared spine",
-        height=1330,
+        height=1390,
         geo=ALL_KITS,
     )
     p.node("user", "user", 0, 0, "Requester or approver using the awxpoc command line")
@@ -2126,8 +2136,8 @@ def all_kits_page() -> Page:
         "user",
         3,
         0,
-        "Deployment operator: starts scheduled workflows with awx-deploy trigger",
-        lw=300,
+        f"Deployment operator: starts scheduled workflows with awx-deploy trigger. {SCHEDULED}",
+        lw=440,
     )
     p.node("model", "bedrock", 0, 1, "Amazon Bedrock model (Claude Sonnet)")
     p.node("runtime", "agentcore", 1, 1, "Amazon Bedrock AgentCore Runtime: the agent", w=180)
@@ -2136,12 +2146,13 @@ def all_kits_page() -> Page:
     group(p, "connected", 1120, "Kits 5 to 8: customers' connected accounts", OVERVIEWS[4:])
     p.node("api", "apigw", 1, 3, "Approval application programming interface (API)")
     p.node("sfn", "sfn", 2, 3, "AWS Step Functions: one workflow per kit action", lw=160)
-    p.node("ddb", "ddb", 0, 4, "Amazon DynamoDB: proposals, decisions, ledger, operations")
+    p.node("ddb", "ddb", 0, 4, "Amazon DynamoDB: proposals, decisions, ledger, operations, audit")
     p.node("adapter", "lambda", 1, 4, "Mutation adapter (AWS Lambda): the only Airwallex writer")
-    p.node("awx", "ext", 2, 4, "Airwallex sandbox", w=200, h=70)
+    p.node("awx", "ext", 2, 4, "Airwallex sandbox", w=200, h=60)
     p.node("reader", "lambda", 3, 4, "Reader Lambda per kit: GET only")
-    p.node("secret", "secrets", 4, 4, "AWS Secrets Manager: Airwallex credentials")
+    p.node("secret", "secrets", 4, 4, "AWS Secrets Manager: Airwallex credentials", lw=180)
 
+    # People and the agent
     p.wire("user", "cognito", "signs in", ("R", 0.5), ("L", 0.5), prefer=[0])
     p.wire(
         "user",
@@ -2161,27 +2172,23 @@ def all_kits_page() -> Page:
         ("B", 0.2),
         ("T", 14 / 15),
         [(980, 500), (600, 500)],
-        prefer=[1],
+        prefer=[0],
     )
-    p.wire("gateway", "connected", "calls tools", ("B", 0.8), ("T", 0.28 / 0.6), prefer=[0])
+    p.wire(
+        "gateway",
+        "connected",
+        "calls tools",
+        ("B", 0.8),
+        ("T", 0.28 / 0.6),
+        prefer=[(0, 0.2)],
+    )
     p.wire(
         "user",
         "api",
         "approves or rejects",
         ("T", 0.5),
         ("T", 0.5),
-        [(150, 120), (690, 120), (690, 910), (430, 910)],
-        color=APPROVE,
-        prefer=[1],
-    )
-    p.wire("api", "sfn", "resumes", ("R", 0.2), ("L", 0.2), color=APPROVE, prefer=[0])
-    p.wire(
-        "api",
-        "ddb",
-        "records decisions",
-        ("L", 0.5),
-        ("T", 0.25),
-        [(136, 970)],
+        [(150, 120), (690, 120), (690, 950), (430, 950)],
         color=APPROVE,
         prefer=[1],
     )
@@ -2189,29 +2196,41 @@ def all_kits_page() -> Page:
         "op",
         "sfn",
         "starts",
-        ("L", 0.8),
-        ("R", 0.3),
-        [(790, 206.8), (790, 958.8)],
+        ("L", 0.5),
+        ("T", 0.8),
+        [(790, 190), (790, 968), (746.8, 968)],
         dashed=True,
-        prefer=[0],
+        prefer=[(0, 0.2)],
     )
+    # Proposals, approvals and state
     p.wire(
         "platform",
         "sfn",
         "proposes",
         ("B", 0.9),
         ("T", 0.25),
-        [(580, 930), (716, 930)],
-        prefer=[0],
+        [(580, 975), (716, 975)],
+        prefer=[(0, 0.2)],
     )
-    p.wire("connected", "sfn", "proposes", ("B", 0.1), ("R", 0.75), [(880, 984)], prefer=[0])
+    p.wire("connected", "sfn", "proposes", ("B", 0.1), ("R", 0.75), [(880, 1032)], prefer=[0])
+    p.wire("api", "sfn", "resumes", ("R", 0.2), ("L", 0.2), color=APPROVE, prefer=[0])
+    p.wire(
+        "api",
+        "ddb",
+        "records decisions",
+        ("L", 0.5),
+        ("T", 0.25),
+        [(136, 1018)],
+        color=APPROVE,
+        prefer=[1],
+    )
     p.wire(
         "sfn",
         "ddb",
         "records proposals and the ledger",
         ("L", 0.55),
         ("T", 0.75),
-        [(600, 972.8), (600, 1104), (164, 1104)],
+        [(592, 1020.8), (592, 1150), (164, 1150)],
         prefer=[2],
     )
     p.wire(
@@ -2220,27 +2239,44 @@ def all_kits_page() -> Page:
         "sends",
         ("L", 0.95),
         ("T", 0.25),
-        [(620, 995.2), (620, 1124), (416, 1124)],
+        [(620, 1043.2), (620, 1178), (416, 1178)],
         color=WRITE,
         prefer=[2],
     )
+    # Writes, and the reads through each kit's reader
     p.wire("adapter", "ddb", "records each operation", ("L", 0.5), ("R", 0.5), color=WRITE)
     p.wire("adapter", "awx", "writes", ("R", 0.5), ("L", 0.5), color=WRITE, prefer=[0])
     p.wire(
         "adapter",
         "secret",
         "reads",
-        ("T", 0.75),
-        ("T", 0.5),
-        [(444, 1144), (1300, 1144)],
-        prefer=[1],
+        ("R", 0.85),
+        ("R", 0.5),
+        [(560, 1249.6), (560, 1345), (1410, 1345), (1410, 1230)],
+        prefer=[(2, 0.07)],
     )
-    # The kit groups' reads carry no label of their own: they run side by side into the reader.
-    p.wire("platform", "reader", "", ("B", 29 / 30), ("T", 0.25), [(620, 852), (1026, 852)])
-    p.wire("connected", "reader", "", ("B", 0.4), ("T", 48 / 56))
+    p.wire(
+        "platform",
+        "reader",
+        "reads",
+        ("B", 59 / 60),
+        ("T", 0.5),
+        [(630, 890), (1040, 890)],
+        prefer=[(1, 110 / 410)],
+    )
+    p.wire("connected", "reader", "", ("B", 245.2 / 600), ("T", 0.95))
+    p.wire(
+        "sfn",
+        "reader",
+        "reads",
+        ("R", 0.25),
+        ("T", 0.05),
+        [(1014.8, 1004)],
+        prefer=[(0, 57 / 256.8)],
+    )
     p.wire("reader", "awx", "reads (GET only)", ("L", 0.5), ("R", 0.5), prefer=[0])
     p.wire("reader", "secret", "reads", ("R", 0.5), ("L", 0.5), prefer=[0])
-    bounds = [(64, 236), (308, 216), (532, 334), (874, 200), (1082, 228)]
+    bounds = [(64, 236), (308, 216), (532, 382), (922, 200), (1130, 240)]
     keep_clear(p, ALL_KITS_LANES, bounds)
     n0 = len(p.label_rects)
     p.place_labels()
