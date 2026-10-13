@@ -261,7 +261,7 @@ feeds) reaches it only through `awx-deploy`, the operator CLI in
 reads the `AwxSpine` stack for the tenants table, ledger table and secret, and finds state
 machines by their fixed `awx-<kit>-<action>` names. Nothing it does moves money.
 
-```
+```text
 awx-deploy [--profile P] [--region R] tenants put <file> [--replace] [--var NAME=VALUE ...]
 awx-deploy [--profile P] [--region R] run <kit> <command> <args.json> [--var NAME=VALUE ...]
 awx-deploy plan  <deploy-file> [--var NAME=VALUE ...] [--vars vars.yaml]

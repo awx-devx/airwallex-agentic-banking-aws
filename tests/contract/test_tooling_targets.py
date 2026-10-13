@@ -347,6 +347,109 @@ def test_the_region_check_finds_the_target_anywhere_in_a_make_command(block, cau
     assert bool(_make_lines_without_region(block)) is caught
 
 
+# The CDK CLI, then any words of the same command, then a command that targets a Region.
+CDK_REGION_COMMAND = re.compile(
+    r"(?:\baws-cdk@\S+|(?<![\w@/-])cdk)(?:\s+[^\s;&|]+)*?\s+(synth|deploy|destroy|diff)(?![\w-])"
+)
+CDK_REGION_ARGUMENT = re.compile(r"(^|\s)(-c|--context)\s+region=")
+
+
+def _pasted_commands(text: str):
+    """(line number, command) for each line of a pasted block, joining backslash continuations."""
+    pasted = [
+        (number, line)
+        for number, tag, _, line in _load_markdown_blocks().code_lines(text)
+        if tag not in _load_markdown_blocks().NOT_PASTED
+    ]
+    joined, start = "", None
+    for number, line in pasted:
+        joined = f"{joined} {line}" if start is not None else line
+        start = number if start is None else start
+        if not line.rstrip().endswith("\\"):
+            yield start, joined
+            joined, start = "", None
+    if start is not None:
+        yield start, joined
+
+
+def _cdk_lines_without_region(text: str) -> list[str]:
+    return [
+        f"{number}: {command.strip()}"
+        for number, command in _pasted_commands(text)
+        if CDK_REGION_COMMAND.search(command) and not CDK_REGION_ARGUMENT.search(command)
+    ]
+
+
+def _bracketed_words(text: str) -> list[str]:
+    # A usage synopsis's `[--flag]` is a glob to zsh ("bad pattern") and a literal argument to
+    # bash. The test command `[` and `[[` are allowed.
+    return [
+        f"{number}: {command.strip()}"
+        for number, command in _pasted_commands(text)
+        if any(w.startswith("[") and w not in ("[", "[[") for w in command.split())
+    ]
+
+
+@pytest.mark.parametrize(
+    ("block", "caught"),
+    [
+        ('```\nnpx -y aws-cdk@2.1144.0 synth --all -c region="$REGION"\n```\n', False),
+        ("```\nnpx -y aws-cdk@2.1144.0 synth --all -c account=1\n```\n", True),
+        ("```\nnpx -y aws-cdk@2.1144.0 deploy --all \\\n    -c account=1\n```\n", True),
+        ('```\nnpx -y aws-cdk@2.1144.0 deploy --all \\\n    -c region="$REGION"\n```\n', False),
+        ("```\nnpx -y aws-cdk@2.1144.0 destroy --exclusively AwxKitK1\n```\n", True),
+        ("```\ncd infra && npx -y aws-cdk@2.1144.0 diff\n```\n", True),
+        ("```\ncdk deploy AwxAgentStack --exclusively\n```\n", True),
+        ("~~~sh\nnpx -y aws-cdk@2.1144.0 synth\n~~~\n", True),
+        ('```\nnpx -y aws-cdk@2.1144.0 synth --context region="$REGION"\n```\n', False),
+        ("```\nnpx -y aws-cdk@2.1144.0 bootstrap aws://1/us-west-2\n```\n", False),
+        ("```text\nnpx -y aws-cdk@2.1144.0 synth\n```\n", False),
+        ("Run npx -y aws-cdk@2.1144.0 synth after that.\n", False),
+    ],
+)
+def test_the_cdk_region_check(block, caught):
+    assert bool(_cdk_lines_without_region(block)) is caught
+
+
+@pytest.mark.parametrize(
+    ("block", "caught"),
+    [
+        ("```\nmake deploy ACCOUNT=1 [REGION=us-west-2]\n```\n", True),
+        ("```\ncdk deploy --all \\\n    -c account=1 [--require-approval never]\n```\n", True),
+        ('```\n[ -n "$REGION" ] || echo unset\n```\n', False),
+        ('```\n[[ -n "$REGION" ]] || echo unset\n```\n', False),
+        ('```\naws --query "Stacks[0].Outputs"\n```\n', False),
+        ("```text\nawx-deploy [--profile P] run <kit>\n```\n", False),
+    ],
+)
+def test_the_bracketed_word_check(block, caught):
+    assert bool(_bracketed_words(block)) is caught
+
+
+def _tracked_markdown() -> list[str]:
+    return _load_markdown_blocks().markdown_files()
+
+
+def test_every_pasted_cdk_synth_deploy_destroy_and_diff_passes_the_region():
+    # With no -c region the app targets the default Region, so a pasted destroy can remove the
+    # wrong deployment.
+    missing = [
+        f"{name}:{hit}"
+        for name in _tracked_markdown()
+        for hit in _cdk_lines_without_region((REPO / name).read_text())
+    ]
+    assert not missing, "CDK commands without -c region=:\n" + "\n".join(missing)
+
+
+def test_no_pasted_block_holds_a_bracketed_optional_word():
+    found = [
+        f"{name}:{hit}"
+        for name in _tracked_markdown()
+        for hit in _bracketed_words((REPO / name).read_text())
+    ]
+    assert not found, "bracketed words in pasted blocks:\n" + "\n".join(found)
+
+
 def test_every_documented_make_bootstrap_synth_and_deploy_passes_region():
     # A documented command (in a fenced code block) without REGION= deploys to the default
     # Region in a shell where REGION is unset, so it can create a second deployment beside the

@@ -370,9 +370,11 @@ client and never printed):
 ```
 uv run --all-packages python kits/k1_treasury/scripts/seed_deployed_book.py \
     --ledger-table <AwxSpine ledger table> \
-    --map ob-supplier-eur=<beneficiary id> --book-version demo-1 [--replace] \
-    [--scenario-start <YYYY-MM-DD>]
+    --map ob-supplier-eur=<beneficiary id> --book-version demo-1
 ```
+
+Add `--replace` to replace a seeded book, and `--scenario-start <YYYY-MM-DD>` to start the
+scenario on that date.
 
 ## Guide ambiguities and the reading taken
 

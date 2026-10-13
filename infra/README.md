@@ -81,12 +81,14 @@ needed for a deploy (see [docs/testing.md](../docs/testing.md) for the sandbox l
 
 ```
 cd infra
-npx -y aws-cdk@2.1144.0 synth --all -c account=111122223333 -c alert_email=you@example.com
+npx -y aws-cdk@2.1144.0 synth --all -c account=111122223333 -c alert_email=you@example.com \
+    -c region="$REGION"
 npx -y aws-cdk@2.1144.0 deploy --all --outputs-file cdk-outputs.json \
-    -c account=<12-digit id> -c alert_email=<address> [--require-approval never]
+    -c account=<12-digit id> -c alert_email=<address> -c region="$REGION"
 ```
 
-Add `-c kits=k1,k4` to either when `KITS` is set, and the contents of `CDK_ARGS` at the end.
+Add `-c kits=k1,k4` to either when `KITS` is set, and the contents of `CDK_ARGS` at the end,
+for example `--require-approval never` in a shell with no terminal.
 `cdk deploy --all` orders the stacks itself:
 spine, kit stacks, agent stack. `infra/cdk-outputs.json` holds the stack outputs (Gateway URL,
 Runtime ARN, user pool client, approval API URL, secret ARN, tenants table). `awxpoc --config`
@@ -114,7 +116,7 @@ use"), and CDK deploys producers first. So removing or renaming a `SPECS` action
 a state machine or a reader, takes two deploys:
 
 1. Deploy the consumer first without the reference, for example
-   `npx -y aws-cdk@2.1144.0 deploy AwxAgentStack --exclusively ...` with the tool removed.
+   `npx -y aws-cdk@2.1144.0 deploy AwxAgentStack --exclusively -c region="$REGION" ...` with the tool removed.
 2. Then deploy the producer (the kit stack or the spine).
 
 Alternatively keep the old export for one deploy with `stack.export_value(...)` in the
@@ -177,8 +179,9 @@ These are instructions for a person. Nothing here is run by the build.
 
 ### Order
 
-`npx -y aws-cdk@2.1144.0 destroy --all -c account=<id> -c alert_email=<address>` from `infra/`,
-with no `-c kits=` so every kit stack is in the app. The CLI destroys the agent stack, then
+Set `REGION` in the shell to the Region of the deployment being removed. Then run
+`npx -y aws-cdk@2.1144.0 destroy --all -c account=<id> -c alert_email=<address> -c region="$REGION"`
+from `infra/`, with no `-c kits=` so every kit stack is in the app. The CLI destroys the agent stack, then
 the kit stacks, then the spine:
 
 - the agent stack imports every kit's state machines;
@@ -189,7 +192,8 @@ To remove one kit, deploy the agent stack with `-c kits=` naming the other kits,
 this from `infra/`, with no `-c kits=` context:
 
 ```
-npx -y aws-cdk@2.1144.0 destroy --exclusively AwxKitK<N> -c account=<id> -c alert_email=<address>
+npx -y aws-cdk@2.1144.0 destroy --exclusively AwxKitK<N> -c account=<id> -c alert_email=<address> \
+    -c region="$REGION"
 ```
 
 With `-c kits=`, `AwxKitK<N>` is not in the app and the CLI cannot find the stack. Without
