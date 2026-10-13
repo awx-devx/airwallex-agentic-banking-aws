@@ -96,7 +96,7 @@ packages/
 kits/              one package per kit, k1_treasury to k8_settlement
 infra/             the AWS CDK app: AwxSpine, AwxKitK1 to AwxKitK8, AwxAgentStack
 deploy/            per-kit deploy files for awx-deploy
-scripts/           secret scan and deployed security checks
+scripts/           secret scan, secret seeding and deployed security checks
 tests/             cross-cutting contract and security suites
 docs/              repository documentation and architecture diagrams
 ```

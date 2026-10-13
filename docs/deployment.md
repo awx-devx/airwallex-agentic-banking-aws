@@ -112,48 +112,26 @@ actual and 100 percent forecast) emails the same address directly.
 
 ## Seed the Airwallex secret
 
-The spine creates the Airwallex secret empty. Put the sandbox credentials into it as a JSON
-object with `client_id` and `api_key`, out of band, and never commit them or write them to a
-file in the repository:
+The spine creates the Airwallex secret empty. Put the sandbox credentials into it out of band,
+and never commit them or write them to a file in the repository:
 
 ```
-SECRET_ARN=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["AirwallexSecretArn"])')
-python3 -c 'import getpass, json, os; v = {"client_id": getpass.getpass("Airwallex client ID: "), "api_key": getpass.getpass("Airwallex API key: ")}; f = os.open("/tmp/awx-secret.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(f, json.dumps(v).encode()); os.close(f)'
-aws --profile awx-deploy --region "${REGION:?set REGION first}" secretsmanager put-secret-value \
-    --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
-rm /tmp/awx-secret.json
+uv run --all-packages python scripts/seed_airwallex_secret.py --profile awx-deploy --region "${REGION:?set REGION first}"
 ```
 
-`python3` prompts for the client ID and the API key without echoing them, and writes
-`/tmp/awx-secret.json` readable by you only. The values never enter the shell's variables,
-and the prompts work the same in bash and zsh. If `/tmp/awx-secret.json` already exists,
-`python3` refuses to write it: delete it and run the block again.
+The script prompts for the client ID and the API key without echoing them, and refuses an
+empty value. It calls Secrets Manager `PutSecretValue` with a JSON object holding `client_id`
+and `api_key`, so no value is written to a file, put on a command line or printed. Ctrl-C at a
+prompt uploads nothing. The script finds the secret's Amazon Resource Name (ARN) in
+`infra/cdk-outputs.json`, which `make deploy` writes once the whole deploy has finished. Before
+then, it reads the ARN from the spine stack's outputs in that Region, so you can seed the secret
+while the later stacks still deploy. `--secret-id <ARN>` names the secret directly.
 
-The prompts need a terminal. In a shell with no terminal, read the same values
-from an owner-only env file instead: the `KEY=VALUE` file with `AWX_CLIENT_ID` and
-`AWX_API_KEY` that the sandbox tests read, `~/.config/airwallex-sandbox/credentials.env` by
-default. Keep that file outside the repository and readable by you only (`chmod 600`). This
-keeps the values off every command line and out of shell history:
-
-```
-SECRET_ARN=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["AirwallexSecretArn"])')
-( umask 077
-  uv run --all-packages python -c 'import json; from awx_spine import EnvFileCredentials; c = EnvFileCredentials().get(); print(json.dumps({"client_id": c.client_id, "api_key": c.api_key}))' \
-      > /tmp/awx-secret.json )
-aws --profile awx-deploy --region "${REGION:?set REGION first}" secretsmanager put-secret-value \
-    --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
-rm /tmp/awx-secret.json
-```
-
-To read another file, pass its path: `EnvFileCredentials(Path("<file>"))`, with
-`from pathlib import Path`. The secret's Amazon Resource Name (ARN) reaches
-`infra/cdk-outputs.json` only once the whole deploy has finished. To seed the secret while
-the later stacks still deploy, read it from the spine stack's outputs instead:
+The prompts need a terminal. In a shell with no terminal, put `AWX_CLIENT_ID` and `AWX_API_KEY`
+in the environment, for example from your CI system's secret store, and pass `--from-env`:
 
 ```
-SECRET_ARN=$(aws --profile awx-deploy --region "${REGION:?set REGION first}" \
-    cloudformation describe-stacks --stack-name AwxSpine --query "Stacks[0].Outputs[?OutputKey=='AirwallexSecretArn'].OutputValue" \
-    --output text)
+uv run --all-packages python scripts/seed_airwallex_secret.py --profile awx-deploy --region "${REGION:?set REGION first}" --from-env
 ```
 
 Of the deployed roles, only the per-kit readers and the mutation adapter can read this secret.
