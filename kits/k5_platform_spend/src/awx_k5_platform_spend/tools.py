@@ -97,8 +97,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         "propose_reconcile_bridge",
         ToolKind.PROPOSE,
         "Check a bridge that is still in flight for this customer's obligation and record its "
-        "outcome if the provider has settled or failed it. Moves no money; anything not "
-        "definitive is left for a person.",
+        "outcome if the provider has settled or failed it. Moves no money, and code records "
+        "only a definitive outcome.",
         _schema({"obligation_ref": _REF}, _RATIONALE),
     ),
     ToolSpec(
@@ -113,8 +113,9 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_collect_repayment",
         ToolKind.PROPOSE,
-        "Propose collecting the customer's open bridge advance back once their deposit has "
-        "landed. The amount is the ledger receivable.",
+        "Propose collecting the customer's open bridge advance back. Code refuses it unless "
+        "the wallet holds at least the receivable, or a repayment of it is already in flight. "
+        "The amount is the ledger receivable.",
         _schema({}, _RATIONALE),
     ),
 )

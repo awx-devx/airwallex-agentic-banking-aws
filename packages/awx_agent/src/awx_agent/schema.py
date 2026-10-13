@@ -69,8 +69,9 @@ def to_gateway_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
 
 
 # Appended to every propose_* tool's description. Code sets the risk tier, which decides
-# whether a different person must approve the proposal, so no description says in advance.
-PROPOSE_SUFFIX = " Creates a proposal only. Code sets its risk tier when you propose."
+# whether a different person must approve the proposal, so no description says in advance
+# whether a proposal needs approval.
+PROPOSE_SUFFIX = " Creates a proposal. Code sets its risk tier when you propose."
 
 IDENTITY_PROPERTY = {
     "type": "string",

@@ -61,8 +61,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         name="propose_close_incident",
         kind=ToolKind.PROPOSE,
         description=(
-            "Record an incident's closure once the original is CANCELLED with a failure code "
-            "and its one replacement is PAID or CANCELLED. Moves no money."
+            "Record an incident's closure. Code refuses it unless the original is CANCELLED "
+            "with a failure code and its one replacement is PAID or CANCELLED. Moves no money."
         ),
         input_schema={
             "type": "object",

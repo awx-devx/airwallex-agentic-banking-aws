@@ -45,7 +45,7 @@ _TERMS_PROPERTIES: dict[str, Any] = {
         "pattern": r"^[0-9a-f]{64}$",
         "description": "Lower-case hex SHA-256 of the exact vendor terms document these values "
         "were read from (for example the output of `sha256sum terms.pdf`). The person supplies "
-        "it with the document; it is recorded in the proposal so the approval names one "
+        "it with the document; it is recorded in the proposal, which names one "
         "document. Never invent one: ask the person for it",
     },
     "forecast_flows": {
@@ -116,8 +116,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         "read_card_controls",
         ToolKind.READ,
         "Read a card's id, status, authorization controls and remaining limits. Give exactly "
-        "one of card_id or purchase_ref; once an issue_card run has issued the card, pass its "
-        "purchase_ref to learn the card's id.",
+        "one of card_id or purchase_ref. With the purchase_ref of an issue_card run it returns "
+        "the card's id, if the run has issued the card.",
         _CARD_OR_PURCHASE_SCHEMA,
     ),
     ToolSpec(
@@ -132,8 +132,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         ToolKind.PROPOSE,
         "Propose a cardholder and a virtual card whose controls enforce the chosen plan. The "
         "proposal holds the exact control set. For a card the limit test may run on, use a "
-        "purchase_ref starting 'limit-test-'. Once the run has issued the card, "
-        "read_card_controls with the same purchase_ref returns the card id.",
+        "purchase_ref starting 'limit-test-'. read_card_controls with the same purchase_ref "
+        "returns the card id, if the run has issued the card.",
         _TERMS_SCHEMA,
     ),
     ToolSpec(
@@ -145,19 +145,19 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_freeze_card",
         ToolKind.PROPOSE,
-        "Freeze a kit 2 card, which revokes its spending authority.",
+        "Propose freezing a kit 2 card, which revokes its spending authority.",
         _CARD_ACTION_SCHEMA,
     ),
     ToolSpec(
         "propose_unfreeze_card",
         ToolKind.PROPOSE,
-        "Unfreeze a kit 2 card, which restores its spending authority.",
+        "Propose unfreezing a kit 2 card, which restores its spending authority.",
         _CARD_ACTION_SCHEMA,
     ),
     ToolSpec(
         "propose_close_card",
         ToolKind.PROPOSE,
-        "Close a kit 2 card permanently. Closing is irreversible.",
+        "Propose closing a kit 2 card permanently. Closing is irreversible.",
         _CARD_ACTION_SCHEMA,
     ),
     ToolSpec(

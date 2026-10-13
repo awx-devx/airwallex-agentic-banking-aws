@@ -240,7 +240,8 @@ def test_spec_agent_min_tier_auto_keeps_auto(monkeypatch):
     # not say that money moved.
     assert out["status_message"] == (
         "The run has started without approval. The workflow rechecks policy before its first "
-        "step and may still stop it. This result does not say whether money has moved."
+        "step and may still stop it. This result does not say whether money has moved. "
+        f"To see its status later, run `awxpoc proposals show {out['proposal_id']}`."
     )
 
 
@@ -269,9 +270,12 @@ def test_status_message_says_what_each_status_means():
     waiting = d.dispatch("propose_pay_supplier", event(PAY))
     assert waiting["status"] == "AWAITING_APPROVAL"
     assert waiting["status_message"] == (
-        "Nothing has run yet. The proposal waits for approval by someone other than the proposer."
+        "Nothing has run yet. The proposal waits for approval by someone other than the "
+        "proposer. To see its status later, run "
+        f"`awxpoc proposals show {waiting['proposal_id']}`."
     )
-    assert tools_mod._status_message("BLOCKED") == (
+    # A blocked proposal never runs, so its message has no status pointer.
+    assert tools_mod._status_message("BLOCKED", "p-1") == (
         "Policy blocked this proposal. Nothing has run and nothing will run."
     )
 

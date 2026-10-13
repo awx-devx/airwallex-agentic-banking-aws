@@ -88,7 +88,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         kind=ToolKind.PROPOSE,
         description=(
             "Propose challenging a dispute with evidence_ids already ingested for it, cited "
-            "facts and a short narrative for a person to review. Code blocks it when the "
+            "facts and a short narrative. Code blocks it when the "
             "economics, evidence minimum or deadline do not support it. A dispute "
             "is challenged once." + _DATA_NOTE
         ),

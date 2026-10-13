@@ -15,7 +15,7 @@ def test_gateway_schema_keeps_only_supported_keywords_and_folds_the_rest():
     assert "pattern=" in props["amount"]["description"]
     assert props["lines"]["items"]["properties"]["ref"] == {"type": "string"}
     assert d["description"].endswith(
-        " Creates a proposal only. Code sets its risk tier when you propose."
+        " Creates a proposal. Code sets its risk tier when you propose."
     )
     # The identity field is a declared, optional property the server fills.
     assert props["_awx_caller"]["type"] == "string"

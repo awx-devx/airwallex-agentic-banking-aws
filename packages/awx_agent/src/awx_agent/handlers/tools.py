@@ -336,7 +336,7 @@ def _summary(tool: str, kit: str, proposal: Proposal, *, retry: bool) -> dict[st
         "origin": proposal.origin.value,
         "reasons": list(proposal.reasons),
         "status": _status_for(proposal.risk_tier.value),
-        "status_message": _status_message(proposal.risk_tier.value),
+        "status_message": _status_message(proposal.risk_tier.value, proposal.proposal_id),
         "existing_proposal": retry,
         "expires_at": to_jsonable(proposal.expires_at),
         "summary": {
@@ -371,8 +371,16 @@ AWAITING_MESSAGE = (
 )
 
 
-def _status_message(tier: str) -> str:
-    return STATUS_MESSAGES.get(tier, AWAITING_MESSAGE)
+# A proposal that can still run ends with the command that shows its status later, so the
+# model points there and does not offer a read check the kit may not have.
+STATUS_POINTER = "To see its status later, run `awxpoc proposals show {proposal_id}`."
+
+
+def _status_message(tier: str, proposal_id: str) -> str:
+    message = STATUS_MESSAGES.get(tier, AWAITING_MESSAGE)
+    if tier == "BLOCKED":
+        return message
+    return f"{message} {STATUS_POINTER.format(proposal_id=proposal_id)}"
 
 
 def _existing_message(state: str, tier: str) -> str:

@@ -97,10 +97,10 @@ TOOLS: tuple[ToolSpec, ...] = (
         name="propose_lock_rates",
         kind=ToolKind.PROPOSE,
         description=(
-            "Lock FX quotes for one pay period's payroll, same input as propose_run_payroll. "
-            "Code quotes each employer's conversions on that employer's own account and stores "
-            "the quotes; it moves no money. Then propose the payroll, which binds the exact "
-            "locked sell amounts. Locks last about an hour."
+            "Propose locking FX quotes for one pay period's payroll, same input as "
+            "propose_run_payroll. Code quotes each employer's conversions on that employer's "
+            "own account and stores the quotes; it moves no money. Then propose the payroll, "
+            "which binds the exact locked sell amounts. Locks last about an hour."
         ),
         input_schema=_obj(
             {

@@ -16,19 +16,46 @@ from awx_agent.schema import PROPOSE_SUFFIX, tool_definition
 from awx_common import ToolKind
 from awx_common.kits import KIT_DIRS
 
-# Wording that states a proposal's approval outcome before code has set its tier.
+# Wording that states a proposal's approval outcome before code has set its tier. A read_*
+# description may name the tier it returns ("the approval tier"), so this is the read rule.
 APPROVAL_OUTCOME = re.compile(
     r"\bneeds?\b[^.;]*\bapprov"
     r"|\brequires?\b[^.;]*\bapprov"
+    r"|\bapproval (?:is )?required\b"
     r"|\bwithout (?:approval|an? approv)"
     r"|\bno approval\b"
     r"|\bapproval[- ](?:gated|needed)\b"
-    r"|\bmust approve\b"
+    r"|\bmust (?:approve|agree)\b"
     r"|\bapproves? (?:it|them|when)\b"
     r"|\b(?:one|two|a single) approv"
+    r"|\b(?:auto|dual|single)[- ]approv"
+    r"|\b(?:an?|the) approver"
+    r"|\b(?:once|when) approved\b"
+    r"|\bafter (?:approval|it is approved)\b"
+    r"|\bthe approval\b(?!\s+tier)"
     r"|\bnothing (?:moves|happens) until\b"
     r"|\bask a person\b"
-    r"|\bruns? (?:at once|automatically)\b",
+    r"|\bneeds? (?:a person|someone)\b"
+    r"|\b(?:a person|someone) to (?:review|approve|sign)\b"
+    r"|\bfor (?:a person to|review)\b"
+    r"|\bsign(?:s|ed)? (?:it |them )?off\b"
+    r"|\bsign-off\b"
+    r"|\b(?:runs?|starts?) (?:at once|immediately|automatically)\b",
+    re.IGNORECASE,
+)
+
+# A propose_* description says what the proposal does and leaves every approval word to code,
+# so outside PROPOSE_SUFFIX it may not mention approval, a sign-off, a person or a timing.
+PROPOSE_FORBIDDEN = re.compile(
+    r"approv"
+    r"|\bsign-off\b"
+    r"|\bsign it off\b"
+    r"|\bmust agree\b"
+    r"|\bat once\b"
+    r"|\bimmediately\b"
+    r"|\bautomatic"
+    r"|\bneeds? a person\b"
+    r"|\bfor (?:a person|review)\b",
     re.IGNORECASE,
 )
 
@@ -40,27 +67,68 @@ def _definitions():
             yield kit, spec, tool_definition(spec)
 
 
+def _schema_descriptions(schema, where="inputSchema"):
+    """Every `description` in a JSON schema, with the path to it."""
+    if isinstance(schema, dict):
+        for key, value in schema.items():
+            if key == "description" and isinstance(value, str):
+                yield where, value
+            else:
+                yield from _schema_descriptions(value, f"{where}.{key}")
+    elif isinstance(schema, list):
+        for index, value in enumerate(schema):
+            yield from _schema_descriptions(value, f"{where}[{index}]")
+
+
+def _descriptions(definition):
+    """The tool's description, then every description in its input schema."""
+    yield "description", definition["description"]
+    yield from _schema_descriptions(definition["inputSchema"])
+
+
 DEFINITIONS = list(_definitions())
+IDS = [f"{kit}-{spec.name}" for kit, spec, _ in DEFINITIONS]
+PROPOSALS = [d for d in DEFINITIONS if d[1].kind is ToolKind.PROPOSE]
+PROPOSAL_IDS = [f"{kit}-{spec.name}" for kit, spec, _ in PROPOSALS]
 
 
-@pytest.mark.parametrize(
-    ("kit", "spec", "definition"),
-    DEFINITIONS,
-    ids=[f"{kit}-{spec.name}" for kit, spec, _ in DEFINITIONS],
-)
+@pytest.mark.parametrize(("kit", "spec", "definition"), DEFINITIONS, ids=IDS)
 def test_no_tool_description_states_an_approval_outcome(kit, spec, definition):
-    found = APPROVAL_OUTCOME.findall(definition["description"])
-    assert not found, f"{kit} {spec.name}: {definition['description']}"
+    found = [
+        (where, text) for where, text in _descriptions(definition) if APPROVAL_OUTCOME.search(text)
+    ]
+    assert not found, f"{kit} {spec.name}: {found}"
 
 
-@pytest.mark.parametrize(
-    ("kit", "spec", "definition"),
-    [d for d in DEFINITIONS if d[1].kind is ToolKind.PROPOSE],
-    ids=[f"{kit}-{spec.name}" for kit, spec, _ in DEFINITIONS if spec.kind is ToolKind.PROPOSE],
-)
+@pytest.mark.parametrize(("kit", "spec", "definition"), PROPOSALS, ids=PROPOSAL_IDS)
+def test_no_propose_description_mentions_approval(kit, spec, definition):
+    found = []
+    for where, text in _descriptions(definition):
+        if where == "description":
+            text = text.removesuffix(PROPOSE_SUFFIX)
+        if PROPOSE_FORBIDDEN.search(text):
+            found.append((where, text))
+    assert not found, f"{kit} {spec.name}: {found}"
+
+
+@pytest.mark.parametrize(("kit", "spec", "definition"), PROPOSALS, ids=PROPOSAL_IDS)
 def test_every_propose_description_leaves_the_tier_to_code(kit, spec, definition):
     assert definition["description"].endswith(PROPOSE_SUFFIX)
     assert definition["description"].count("risk tier") == 1
+
+
+@pytest.mark.parametrize(
+    ("kit", "name"),
+    [
+        ("k2", "propose_freeze_card"),
+        ("k2", "propose_unfreeze_card"),
+        ("k2", "propose_close_card"),
+        ("k6", "propose_lock_rates"),
+    ],
+)
+def test_a_card_or_rate_action_description_opens_with_propose(kit, name):
+    (definition,) = [d for k, spec, d in DEFINITIONS if (k, spec.name) == (kit, name)]
+    assert definition["description"].startswith("Propose ")
 
 
 @pytest.mark.parametrize(
@@ -76,10 +144,54 @@ def test_every_propose_description_leaves_the_tier_to_code(kit, spec, definition
         ("A person must approve it.", True),
         ("Ask a person to release a stuck claim.", True),
         ("Needs two approvers.", True),
+        ("Needs a person.", True),
+        ("It needs a person to sign it off.", True),
+        ("Goes to an approver.", True),
+        ("A short summary for the approver.", True),
+        ("An approver signs it.", True),
+        ("Once approved, the card is issued.", True),
+        ("After approval it runs.", True),
+        ("Approval is required.", True),
+        ("Approval required.", True),
+        ("Two people must agree.", True),
+        ("Small changes are auto-approved.", True),
+        ("Runs immediately.", True),
+        ("Starts at once.", True),
+        ("Large payments take dual approval.", True),
+        ("A single-approver action.", True),
+        ("A short narrative for a person to review.", True),
+        ("Sent for review.", True),
+        ("It is recorded in the proposal so the approval names one document.", True),
         ("The plan, with the approval tier the fundable set would need.", False),
         ("Hand a dispute to a person with a summary.", False),
-        ("Creates a proposal only. Code sets its risk tier when you propose.", False),
+        ("The needs_person flag marks items left for a person.", False),
+        ("Record an operator's decision on a claim.", False),
+        ("Its status, for example AWAITING_APPROVAL.", False),
+        ("It is recorded in the proposal, which names one document.", False),
+        (PROPOSE_SUFFIX.strip(), False),
     ],
 )
 def test_the_approval_outcome_check(text, caught):
     assert bool(APPROVAL_OUTCOME.search(text)) is caught
+
+
+@pytest.mark.parametrize(
+    ("text", "caught"),
+    [
+        ("Propose a card. Approval is the risk tier's call.", True),
+        ("Propose it; a sign-off follows.", True),
+        ("Propose it for a person to sign it off.", True),
+        ("Propose it; two people must agree.", True),
+        ("Propose it. It starts at once.", True),
+        ("Propose it. It runs immediately.", True),
+        ("Propose it. Small changes are automatic.", True),
+        ("Propose it. Needs a person.", True),
+        ("Propose a narrative for review.", True),
+        ("Propose challenging a dispute with cited facts and a short narrative.", False),
+        ("Propose collecting the customer's open bridge advance back.", False),
+        ("It is recorded in the proposal, which names one document.", False),
+        ("Leave unset. The server fills this with the signed-in caller.", False),
+    ],
+)
+def test_the_propose_check(text, caught):
+    assert bool(PROPOSE_FORBIDDEN.search(text)) is caught
