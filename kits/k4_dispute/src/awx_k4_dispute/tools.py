@@ -124,9 +124,9 @@ TOOLS: tuple[ToolSpec, ...] = (
         name="propose_clear_dispute_response",
         kind=ToolKind.PROPOSE,
         description=(
-            "Propose clearing an accept or challenge whose outcome is unknown, once "
-            "Airwallex shows no such response at its stage. Pass the attempt's request_ref "
-            "from read_dispute. Code refuses unless a fresh read-back is empty."
+            "Propose clearing an accept or challenge whose outcome is unknown. Pass the "
+            "attempt's request_ref from read_dispute. Code blocks it unless a fresh read-back "
+            "shows no such response at its stage."
         ),
         input_schema=_obj(
             ["dispute_id", "request_ref", "note"],

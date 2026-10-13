@@ -322,17 +322,16 @@ def test_the_prompt_says_an_auto_run_has_started():
     assert "A proposal moves no money" not in flat
 
 
-def test_the_prompt_reads_a_status_before_stating_it():
+def test_the_prompt_sends_the_user_to_the_cli_for_a_status():
     from awx_agent.runtime.prompt import system_prompt
 
     flat = " ".join(system_prompt("k2").split())
-    assert "Before you tell the user a proposal's current status" in flat
-    assert "read it with a read_* tool in this turn" in flat
+    assert "No tool returns a proposal's current status, so never offer to check one." in flat
     # A propose_* retry is the only tool output carrying a status; it can start a second run.
     assert "Never call a propose_* tool to check a status" in flat
     assert (
-        "If no read tool returns the status, say you have not checked it and tell the user to "
-        "run `awxpoc proposals show <proposal_id>`." in flat
+        "Say you have not checked it and give the user `awxpoc proposals show <proposal_id>`."
+        in flat
     )
 
 

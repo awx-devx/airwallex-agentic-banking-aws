@@ -55,7 +55,26 @@ PROPOSE_FORBIDDEN = re.compile(
     r"|\bimmediately\b"
     r"|\bautomatic"
     r"|\bneeds? a person\b"
-    r"|\bfor (?:a person|review)\b",
+    r"|\bfor (?:a person|review)\b"
+    r"|\bsigns? off\b"
+    r"|\bsign off\b"
+    r"|\bhuman\b"
+    r"|\breview(?:s|ed|er)?\b"
+    r"|\bconfirm"
+    r"|\bauthori[sz]"
+    r"|\b(?:second|another|different) person\b"
+    r"|\bsomeone else\b"
+    r"|\bright away\b"
+    r"|\bstraight away\b"
+    r"|\buntil\b",
+    re.IGNORECASE,
+)
+
+# "once <event>" states as a past event what code checks ("once that week has ended"). The
+# model then reports the event as having happened. "each once", "runs once" and "challenged
+# once" carry no event clause.
+EVENT_CLAUSE = re.compile(
+    r"\bonce\b(?:\s+[\w']+){0,3}?\s+(?:has|have|had|been|\w+ed)\b",
     re.IGNORECASE,
 )
 
@@ -109,6 +128,30 @@ def test_no_propose_description_mentions_approval(kit, spec, definition):
         if PROPOSE_FORBIDDEN.search(text):
             found.append((where, text))
     assert not found, f"{kit} {spec.name}: {found}"
+
+
+@pytest.mark.parametrize(("kit", "spec", "definition"), PROPOSALS, ids=PROPOSAL_IDS)
+def test_no_propose_description_states_a_check_as_an_event(kit, spec, definition):
+    found = [
+        (where, text) for where, text in _descriptions(definition) if EVENT_CLAUSE.search(text)
+    ]
+    assert not found, f"{kit} {spec.name}: {found}"
+
+
+def test_no_read_tool_returns_a_proposal_status():
+    """The status messages and the prompt tell the model that no tool returns a proposal's
+    status. A read tool that takes a proposal_id would make that false: compute the sentence
+    per kit in the handler instead."""
+    from awx_agent.handlers.tools import STATUS_POINTER
+
+    assert STATUS_POINTER.startswith("No tool returns a proposal's status.")
+    reads = [d for d in DEFINITIONS if d[1].kind is ToolKind.READ]
+    assert reads
+    for kit, spec, definition in reads:
+        schema = str(definition["inputSchema"])
+        assert "proposal_id" not in schema, f"{kit} {spec.name}"
+        assert "proposal_id" not in definition["description"], f"{kit} {spec.name}"
+        assert "proposal's status" not in definition["description"], f"{kit} {spec.name}"
 
 
 @pytest.mark.parametrize(("kit", "spec", "definition"), PROPOSALS, ids=PROPOSAL_IDS)
@@ -187,6 +230,21 @@ def test_the_approval_outcome_check(text, caught):
         ("Propose it. Small changes are automatic.", True),
         ("Propose it. Needs a person.", True),
         ("Propose a narrative for review.", True),
+        ("Propose it. A person signs off on it.", True),
+        ("Propose it. Needs sign off.", True),
+        ("Propose it. It needs a human.", True),
+        ("Propose it. Needs a second person.", True),
+        ("Propose it. A different person must confirm it.", True),
+        ("Propose it. A reviewer checks it.", True),
+        ("Propose it. It is reviewed before it runs.", True),
+        ("Propose it. Runs right away.", True),
+        ("Propose it. Runs straight away.", True),
+        ("Propose it. A person authorises it.", True),
+        ("Propose it. Someone else checks it.", True),
+        ("Propose it. Nothing runs until someone confirms it.", True),
+        ("Propose clearing a response. Code blocks it unless a fresh read-back is empty.", False),
+        ("Record an operator's decision on a claim.", False),
+        ("Hand a dispute to a person with a summary.", False),
         ("Propose challenging a dispute with cited facts and a short narrative.", False),
         ("Propose collecting the customer's open bridge advance back.", False),
         ("It is recorded in the proposal, which names one document.", False),
@@ -195,3 +253,21 @@ def test_the_approval_outcome_check(text, caught):
 )
 def test_the_propose_check(text, caught):
     assert bool(PROPOSE_FORBIDDEN.search(text)) is caught
+
+
+@pytest.mark.parametrize(
+    ("text", "caught"),
+    [
+        ("Collect a repayment for its next ISO week, once that week has ended.", True),
+        ("Clear it once Airwallex has shown no such response.", True),
+        ("Collect it back once the deposit landed.", True),
+        ("Issue it once the run has succeeded.", True),
+        ("Close it once it has been replaced.", True),
+        ("Weeks run in order from the first full week after funding, each once.", False),
+        ("The check runs once per proposal.", False),
+        ("A dispute can be challenged once.", False),
+        ("Code blocks it unless that week has ended.", False),
+    ],
+)
+def test_the_event_clause_check(text, caught):
+    assert bool(EVENT_CLAUSE.search(text)) is caught

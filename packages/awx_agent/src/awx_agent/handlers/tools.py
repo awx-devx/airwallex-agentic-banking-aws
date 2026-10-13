@@ -307,7 +307,12 @@ class ToolDispatcher:
             state = f"EXECUTION_{execution_status}"
         out = _summary(tool, self.kit, proposal, retry=True)
         out["status"] = f"EXISTING_PROPOSAL_{state}"
-        out["status_message"] = _existing_message(state, proposal.risk_tier.value)
+        out["status_message"] = _existing_message(
+            state,
+            proposal.risk_tier.value,
+            proposal.proposal_id,
+            finished=bool(outcome) or execution_status in FINISHED_EXECUTIONS,
+        )
         out["execution_status"] = execution_status
         out["proposal_state"] = state
         return out
@@ -371,9 +376,15 @@ AWAITING_MESSAGE = (
 )
 
 
-# A proposal that can still run ends with the command that shows its status later, so the
-# model points there and does not offer a read check the kit may not have.
-STATUS_POINTER = "To see its status later, run `awxpoc proposals show {proposal_id}`."
+# The message for a proposal that can still run ends with the command that shows its status
+# later, so the model points the user there and does not offer a read check. No read tool in
+# kits 1 to 8 returns a proposal's status; tests/contract/test_tool_descriptions.py pins that.
+STATUS_POINTER = (
+    "No tool returns a proposal's status. To see it later, run "
+    "`awxpoc proposals show {proposal_id}`."
+)
+# Step Functions execution statuses after which the execution does nothing more.
+FINISHED_EXECUTIONS = frozenset({"SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED"})
 
 
 def _status_message(tier: str, proposal_id: str) -> str:
@@ -383,18 +394,22 @@ def _status_message(tier: str, proposal_id: str) -> str:
     return f"{message} {STATUS_POINTER.format(proposal_id=proposal_id)}"
 
 
-def _existing_message(state: str, tier: str) -> str:
+def _existing_message(state: str, tier: str, proposal_id: str, *, finished: bool) -> str:
     if state == "IN_PROGRESS" and tier == "AUTO":
-        return (
+        message = (
             "This proposal already exists and its run is executing; it needs no approval. "
             + AUTO_RECHECK
         )
-    if state == "IN_PROGRESS":
-        return (
+    elif state == "IN_PROGRESS":
+        message = (
             "This proposal already exists and its run is in progress: it is waiting for "
             "approval or executing, and this result does not say which."
         )
-    return f"This proposal already exists. Its recorded state is {state}."
+    else:
+        message = f"This proposal already exists. Its recorded state is {state}."
+    if finished or tier == "BLOCKED" or state == "BLOCKED":
+        return message
+    return f"{message} {STATUS_POINTER.format(proposal_id=proposal_id)}"
 
 
 def _error(code: str, message: str) -> dict[str, Any]:

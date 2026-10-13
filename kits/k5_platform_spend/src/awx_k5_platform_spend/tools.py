@@ -113,7 +113,7 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_collect_repayment",
         ToolKind.PROPOSE,
-        "Propose collecting the customer's open bridge advance back. Code refuses it unless "
+        "Propose collecting the customer's open bridge advance back. Code blocks it unless "
         "the wallet holds at least the receivable, or a repayment of it is already in flight. "
         "The amount is the ledger receivable.",
         _schema({}, _RATIONALE),

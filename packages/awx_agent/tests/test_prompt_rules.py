@@ -6,7 +6,9 @@ the user's language". They stated a due date no tool returned, called a payment 
 due today" by guessing today's date, predicted a proposal's status and offered a check no tool
 of its kit does. They assumed a deposit had landed and rounded amounts. When they offered to
 propose an action, they said someone else must approve it, even for an action at the AUTO risk
-tier.
+tier. After a propose, kit 5 offered to check the status "with a read tool" next to the
+`awxpoc proposals show` pointer, paraphrased the AUTO status message, decided from the balances
+that code would not block a proposal, and guessed why a value was null.
 """
 
 import pytest
@@ -26,9 +28,13 @@ FACTS = (
     "status. Never work out today's date or compare dates yourself. If a tool returned the date "
     "but not the status, give the date and say you cannot tell whether it is due today.",
     "- Do not predict the risk tier or status a proposal will get, or whether it needs approval, "
-    "including for an action you offer. Code sets them when you propose.",
+    "including for an action you offer. Code sets them when you propose. Do not predict whether "
+    "code will block an action, and do not apply a tool description's checks to the figures "
+    "yourself.",
     "- Do not say or assume that an event has happened, such as a deposit landing or a payment "
     "settling, unless a tool returned it.",
+    "- Do not explain why a value is what it is unless a tool returned the reason, and do not "
+    "guess one.",
     '- For a proposal\'s current status, follow the status rule under "After you propose".',
     "- Offer to check something yourself only when one of your read_* tools returns it. If none "
     "of them does, tell the user you cannot check it yourself.",
@@ -77,3 +83,23 @@ def test_the_prompt_leaves_approval_to_the_risk_tier(kit):
     # proposal, including an action code runs at the AUTO tier.
     assert "Most proposals wait" not in flat
     assert "nothing moves until" not in flat
+
+
+STATUS_RULE = (
+    "- No tool returns a proposal's current status, so never offer to check one. Say you have "
+    "not checked it and give the user `awxpoc proposals show <proposal_id>`."
+)
+
+
+@pytest.mark.parametrize("kit", sorted(KITS))
+def test_after_a_propose_the_prompt_quotes_the_status_and_offers_no_status_check(kit):
+    after = " ".join(system_prompt(kit).split("\nAfter you propose\n", 1)[1].split())
+    assert (
+        "Then quote the tool's status_message to the user word for word, in the user's language."
+        in after
+    )
+    assert "using the tool's status_message" not in after
+    assert STATUS_RULE in after
+    # No read tool returns a proposal's status, so the rule has no read-tool branch.
+    assert "read it with a read_* tool" not in after
+    assert "If no read tool returns the status" not in after

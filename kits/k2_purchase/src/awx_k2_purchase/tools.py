@@ -145,13 +145,13 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_freeze_card",
         ToolKind.PROPOSE,
-        "Propose freezing a kit 2 card, which revokes its spending authority.",
+        "Propose freezing a kit 2 card. Freezing revokes the card's spending authority.",
         _CARD_ACTION_SCHEMA,
     ),
     ToolSpec(
         "propose_unfreeze_card",
         ToolKind.PROPOSE,
-        "Propose unfreezing a kit 2 card, which restores its spending authority.",
+        "Propose unfreezing a kit 2 card. Unfreezing restores the card's spending authority.",
         _CARD_ACTION_SCHEMA,
     ),
     ToolSpec(
