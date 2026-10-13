@@ -171,6 +171,49 @@ def test_an_empty_region_is_refused_before_cdk_runs(target, region, message):
     assert "aws-cdk" not in done.stdout
 
 
+INJECTED_REGIONS = [
+    "x'; touch {canary}; echo '",
+    "us-west-2'; touch {canary}; echo 'us-west-2",
+    "x'b",
+    "$(shell touch {canary})",
+    "us-west-2$(shell touch {canary})",
+]
+
+
+@needs_make
+@pytest.mark.parametrize("target", ["bootstrap", "synth"])
+@pytest.mark.parametrize("passed", ["argument", "shell-argument", "environment"])
+@pytest.mark.parametrize(
+    "template",
+    INJECTED_REGIONS,
+    ids=["quote", "quote-region", "lone-quote", "shell", "region-shell"],
+)
+def test_a_region_with_shell_text_runs_nothing(tmp_path, target, passed, template):
+    # make expands require-region under `make -n` too, so a REGION value must reach no shell
+    # (and no make function that runs one) before it has passed the format check.
+    canary = tmp_path / "canary"
+    region = template.format(canary=canary)
+    unset = {"ALERT_EMAIL", "ACCOUNT", "CDK_ARGS", "REGION", "MODEL_ID", "FALLBACK_MODEL_ID"}
+    env = {k: v for k, v in os.environ.items() if k not in unset}
+    fixed = ["-n", "-C", str(REPO), target, "ACCOUNT=111122223333", "ALERT_EMAIL=you@example.com"]
+    if passed == "argument":
+        argv = [MAKE, *fixed, f"REGION={region}"]
+    elif passed == "shell-argument":
+        # As the docs pass it: REGION="$REGION" on the make line.
+        env["INJECTED"] = region
+        argv = ["bash", "-c", 'exec "$0" "$@" REGION="$INJECTED"', MAKE, *fixed]
+    else:
+        env["REGION"] = region
+        argv = [MAKE, *fixed]
+    done = subprocess.run(argv, capture_output=True, text=True, env=env)  # noqa: S603
+    assert done.returncode != 0
+    assert REGION_CODE_MESSAGE.format(region=region.strip()) in done.stderr
+    # The make error is the only output: no shell printed a syntax error.
+    assert len(done.stderr.strip().splitlines()) == 1, done.stderr
+    assert "aws-cdk" not in done.stdout
+    assert not canary.exists()
+
+
 @needs_make
 def test_sandbox_test_prints_skip_reasons():
     out = make_dry_run("sandbox-test")

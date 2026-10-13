@@ -78,16 +78,25 @@ require-account:
 # packages/awx_common/src/awx_common/regions.py (a test pins them together).
 REGION_CODE := ^[a-z]{2}(-[a-z]+)+-[0-9]+$$
 OTHER_PARTITION_PREFIXES := cn- us-gov- us-iso- us-isob- eu-isoe-
-REGION_VALUE = $(strip $(REGION))
+# $(value REGION) is the text the caller passed, unexpanded, so make runs no $(...) in it.
+REGION_VALUE = $(strip $(value REGION))
 REGION_CODE_MESSAGE = REGION=$(REGION_VALUE) is not an AWS Region code such as us-west-2
 OTHER_PARTITION_MESSAGE = REGION=$(REGION_VALUE) is not in the commercial AWS partition (aws). This app supports only that partition
+# The characters a Region code is made of, and a function that removes each of them from $(1).
+# It returns text only when $(1) holds another character.
+REGION_CHARACTERS := a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 -
+region_other_characters = $(if $(2),$(call region_other_characters,$(subst $(firstword $(2)),,$(1)),$(wordlist 2,$(words $(2)),$(2))),$(1))
 
 # An empty REGION (REGION=$REGION with REGION unset in the shell) overrides the default above.
-# It is refused here, and so are a value that is not a Region code and a Region in another
+# require-region refuses it, a value that is not a Region code, and a Region in another
 # partition, before cdk bootstraps aws://<id>/<value> or synthesises for it. The checks run
-# as make expands the recipe, so $(error) also stops `make -n`.
+# as make expands the recipe, so $(error) also stops `make -n`. Make functions first check that
+# the value is one word made only of a-z, 0-9 and -, so no other character reaches the shell
+# that checks the pattern.
 require-region:
 	$(if $(REGION_VALUE),,$(error REGION is empty. Set it first, for example: export REGION=us-west-2))
+	$(if $(filter 1,$(words $(REGION_VALUE))),,$(error $(REGION_CODE_MESSAGE)))
+	$(if $(call region_other_characters,$(REGION_VALUE),$(REGION_CHARACTERS)),$(error $(REGION_CODE_MESSAGE)))
 	$(if $(shell printf '%s\n' '$(REGION_VALUE)' | grep -Eqx '$(REGION_CODE)' && echo ok),,$(error $(REGION_CODE_MESSAGE)))
 	$(if $(filter $(addsuffix %,$(OTHER_PARTITION_PREFIXES)),$(REGION_VALUE)),$(error $(OTHER_PARTITION_MESSAGE)))
 	@:
