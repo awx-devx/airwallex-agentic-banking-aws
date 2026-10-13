@@ -155,7 +155,7 @@ def test_the_demo_user_block_runs_and_stops_with_no_region(tmp_path, shell, regi
         f'python3() {{ echo "python3" >> {calls}; cat > /dev/null; }}\n'
     )
     # No AWS credential or configuration reaches the shells, and the `aws` on PATH only records
-    # that it ran. If the `awsd` stub fails to define, no real AWS CLI runs.
+    # that it ran. If the `aws` function stub fails to define, no real AWS CLI runs.
     stub_bin = tmp_path / "bin"
     stub_bin.mkdir()
     (stub_bin / "aws").write_text(f'#!/bin/sh\necho "real aws $*" >> {calls}\n')

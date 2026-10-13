@@ -115,7 +115,7 @@ def read_bridge_position(raw: Mapping[str, Any], ctx: PolicyContext) -> Mapping[
     current setup. It is None when the setup has no such obligation for the caller, so the
     agent has a due date only when the kit holds one.
 
-    `as_of` is the date the kit treats as today (`kit_today`, the date register_shortfall and
+    `as_of` is the UTC date the kit treats as today (`kit_today`, the date register_shortfall and
     bridge_shortfall check), and each shortfall's `due_status` compares its `due_on` with it,
     so the agent has a due status without working one out."""
     from .book import queue_key

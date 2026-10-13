@@ -347,11 +347,18 @@ def test_the_region_check_finds_the_target_anywhere_in_a_make_command(block, cau
     assert bool(_make_lines_without_region(block)) is caught
 
 
-# The CDK CLI, then any words of the same command, then a command that targets a Region.
+# The CDK CLI (`aws-cdk` with or without a version, `cdk`, or a path ending in /cdk), then any
+# words of the same command, then a subcommand that targets a Region.
 CDK_REGION_COMMAND = re.compile(
-    r"(?:\baws-cdk@\S+|(?<![\w@/-])cdk)(?:\s+[^\s;&|]+)*?\s+(synth|deploy|destroy|diff)(?![\w-])"
+    r"(?:\baws-cdk(?:@\S+)?|(?<![\w@-])cdk)(?:\s+[^\s;&|]+)*?\s+(synth|deploy|destroy|diff)"
+    r"(?![\w-])"
 )
-CDK_REGION_ARGUMENT = re.compile(r"(^|\s)(-c|--context)\s+region=")
+# -c region=..., -c "region=...", --context region=... and --context=region=...
+CDK_REGION_ARGUMENT = re.compile(r"(^|\s)(-c|--context)(\s+|=)[\"']?region=")
+# A shell command list splits into its commands at &&, ||, ; and |.
+COMMAND_SEPARATOR = re.compile(r"&&|\|\||;|\|")
+# A quoted string, which the shell passes on as one word with no globbing.
+QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 
 
 def _pasted_commands(text: str):
@@ -374,19 +381,27 @@ def _pasted_commands(text: str):
 
 def _cdk_lines_without_region(text: str) -> list[str]:
     return [
-        f"{number}: {command.strip()}"
-        for number, command in _pasted_commands(text)
-        if CDK_REGION_COMMAND.search(command) and not CDK_REGION_ARGUMENT.search(command)
+        f"{number}: {line.strip()}"
+        for number, line in _pasted_commands(text)
+        if any(
+            CDK_REGION_COMMAND.search(command) and not CDK_REGION_ARGUMENT.search(command)
+            for command in COMMAND_SEPARATOR.split(line)
+        )
     ]
 
 
 def _bracketed_words(text: str) -> list[str]:
-    # A usage synopsis's `[--flag]` is a glob to zsh ("bad pattern") and a literal argument to
-    # bash. The test command `[` and `[[` are allowed.
+    # A usage synopsis's `[--flag]` or `--flag[=X]` is a glob to zsh ("bad pattern" or "no
+    # matches found") and a literal argument to bash: a word that starts with `[`, or holds a
+    # `[` next to `=` or `-`. The test command `[` and `[[` are allowed, and so is a bracket
+    # inside quotes.
     return [
         f"{number}: {command.strip()}"
         for number, command in _pasted_commands(text)
-        if any(w.startswith("[") and w not in ("[", "[[") for w in command.split())
+        if any(
+            (w.startswith("[") and w not in ("[", "[[")) or re.search(r"[=-]\[|\[[=-]", w)
+            for w in QUOTED.sub("''", command).split()
+        )
     ]
 
 
@@ -405,6 +420,16 @@ def _bracketed_words(text: str) -> list[str]:
         ("```\nnpx -y aws-cdk@2.1144.0 bootstrap aws://1/us-west-2\n```\n", False),
         ("```text\nnpx -y aws-cdk@2.1144.0 synth\n```\n", False),
         ("Run npx -y aws-cdk@2.1144.0 synth after that.\n", False),
+        ("```\nnpx -y aws-cdk deploy --all\n```\n", True),
+        ('```\nnpx -y aws-cdk deploy --all -c region="$REGION"\n```\n', False),
+        ("```\n./node_modules/.bin/cdk deploy --all\n```\n", True),
+        ('```\ncdk destroy --all && cdk synth -c region="$REGION"\n```\n', True),
+        ('```\ncdk destroy --all -c region="$REGION"; cdk synth\n```\n', True),
+        ('```\ncdk deploy --all -c region="$REGION" | tee deploy.log\n```\n', False),
+        ('```\nnpx -y aws-cdk@2.1144.0 synth -c "region=$REGION"\n```\n', False),
+        ("```\nnpx -y aws-cdk@2.1144.0 synth --context=region=us-west-2\n```\n", False),
+        ('```\nnpx -y "aws-cdk@2.1144.0" deploy --all\n```\n', True),
+        ("```\npnpm dlx aws-cdk@latest diff\n```\n", True),
     ],
 )
 def test_the_cdk_region_check(block, caught):
@@ -420,6 +445,11 @@ def test_the_cdk_region_check(block, caught):
         ('```\n[[ -n "$REGION" ]] || echo unset\n```\n', False),
         ('```\naws --query "Stacks[0].Outputs"\n```\n', False),
         ("```text\nawx-deploy [--profile P] run <kit>\n```\n", False),
+        ("```\nawx-deploy run k1 --var[=X]\n```\n", True),
+        ("```\nawx-deploy run k1 -[v]\n```\n", True),
+        ("```\naws --query .Stacks[0].Outputs\n```\n", False),
+        ("```\njq '.[0]' out.json\n```\n", False),
+        ('```\nawx-deploy run k1 --var="[=X]"\n```\n', False),
     ],
 )
 def test_the_bracketed_word_check(block, caught):

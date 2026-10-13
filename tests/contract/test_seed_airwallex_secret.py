@@ -324,7 +324,9 @@ def test_from_env_reads_the_environment_and_prompts_for_nothing(tmp_path, capsys
         terminal=False,
     )
     assert code == 0
-    assert _puts(session)[0]["SecretString"] == json.dumps({"client_id": CID, "api_key": KEY})
+    assert [put["SecretString"] for put in _puts(session)] == [
+        json.dumps({"client_id": CID, "api_key": KEY})
+    ]
     assert environ == {}
     out, err = capsys.readouterr()
     assert CID not in out + err
@@ -412,6 +414,9 @@ class _Pty:
 
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
+            # A shell started with SIGINT ignored keeps it ignored, so Ctrl-C would never
+            # reach the script. make, nohup and some CI runners start processes that way.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
             os.chdir(cwd)
             os.execvpe(argv[0], argv, env)  # noqa: S606 - fixed argv, no shell string
         self.out = b""
@@ -516,9 +521,8 @@ def test_ctrl_c_at_the_pasted_prompt_uploads_nothing(tmp_path, shell, bracketed)
 @BRACKETED
 def test_the_pasted_from_env_line_uploads_with_no_prompt(tmp_path, shell, bracketed):
     record, out = _paste(tmp_path, shell, bracketed, [], from_env=True)
-    assert record["calls"][-1] == {
-        "SecretId": ARN,
-        "SecretString": json.dumps({"client_id": CID, "api_key": KEY}),
-    }
+    assert [c for c in record["calls"] if "SecretString" in c] == [
+        {"SecretId": ARN, "SecretString": json.dumps({"client_id": CID, "api_key": KEY})}
+    ]
     assert b"Airwallex client ID" not in out
     assert CID.encode() not in out

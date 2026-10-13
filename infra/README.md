@@ -87,7 +87,7 @@ npx -y aws-cdk@2.1144.0 deploy --all --outputs-file cdk-outputs.json \
     -c account=<12-digit id> -c alert_email=<address> -c region="$REGION"
 ```
 
-Add `-c kits=k1,k4` to either when `KITS` is set, and the contents of `CDK_ARGS` at the end,
+Add `-c kits=k1,k4` to the synth or deploy command when `KITS` is set, and the contents of `CDK_ARGS` at the end,
 for example `--require-approval never` in a shell with no terminal.
 `cdk deploy --all` orders the stacks itself:
 spine, kit stacks, agent stack. `infra/cdk-outputs.json` holds the stack outputs (Gateway URL,
