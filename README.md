@@ -124,8 +124,9 @@ layers.
 ## Deploying
 
 ```sh
-make bootstrap ACCOUNT=<12-digit id>                       # once per account and Region
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>    # every stack, to us-west-2 unless REGION=... is set
+export REGION=us-west-2    # or the Region of the deployment being updated
+make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"                       # once per account and Region
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"    # every stack
 ```
 
 `cdk deploy` asks a person at a terminal to approve AWS Identity and Access Management (IAM)

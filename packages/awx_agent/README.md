@@ -132,9 +132,10 @@ money-moving tool is called); see [docs/deployment.md](../../docs/deployment.md)
    `client_context` and a self-made `_awx_caller` returns NOT_AUTHORISED.
 4. The model ID in the Runtime's `AWX_MODEL_ID` (for example `us.anthropic.claude-sonnet-5`)
    resolves in the deploy Region. The Runtime role's foundation-model resource ends in a
-   wildcard for the dated ID behind the geographic inference profile, and its
+   wildcard for the dated ID behind the geographic inference profile. Its
    `bedrock:InferenceProfileArn` condition allows the model only through the role's own
-   profiles (`infra/constructs/agentcore_runtime.py`); narrow the wildcard once that ID is known.
+   profiles (`infra/constructs/agentcore_runtime.py`). Narrow the wildcard once that ID is
+   known.
 5. Execution idempotency: the same propose call twice yields one execution.
 6. Gateway KMS use: CloudTrail shows which principal and encryption context the Gateway's KMS
    calls carry, which decides whether to scope the role's grant with

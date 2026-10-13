@@ -34,7 +34,7 @@ over every stack, and each suppression carries its reason in the code.
 |---|---|---|
 | `account` | the `CDK_DEFAULT_ACCOUNT` environment variable | The 12-digit AWS account to build for. If neither is set, synth fails rather than target an account by accident. |
 | `region` | `us-west-2` (`DEFAULT_REGION` in `awx_common.regions`) | The AWS Region. `make` passes `REGION`. See "Region and models" in [docs/deployment.md](../docs/deployment.md) for the Region table. |
-| `model_id` | the Region's primary inference profile, for example `us.anthropic.claude-sonnet-5` | The agent's model or inference profile ID. `make` passes `MODEL_ID`. Required, with `fallback_model_id`, for a Region outside the table. |
+| `model_id` | the Region's primary inference profile, for example `us.anthropic.claude-sonnet-5` | The agent's model or inference profile ID. `make` passes `MODEL_ID`. Required, with `fallback_model_id`, for a Region outside the Region table in [docs/deployment.md](../docs/deployment.md). |
 | `fallback_model_id` | the Region's fallback inference profile, for example `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | The model the agent falls back to. `make` passes `FALLBACK_MODEL_ID`. |
 | `alert_email` | `AWX_ALERT_EMAIL` | Where alarms and budget alerts go. Required. The SNS subscription's logical id includes the address, so changing it replaces the subscription. |
 | `kits` | every kit | A comma-separated subset, for example `-c kits=k1,k4`. An empty or unknown list is refused. See "Partial deploys". |
@@ -209,9 +209,9 @@ order:
    CloudFormation, then schedule the key's deletion (7 to 30 days) once nothing it encrypts is
    left.
 
-The AWS Budget `awx-poc-monthly-<region>` is a spine resource, so `cdk destroy --all` deletes
-it. It counts only the costs of its own Region, so a deployment in another Region of the same
-account has its own budget.
+The budget `awx-poc-monthly-<region>` (AWS Budgets) is a spine resource, so
+`cdk destroy --all` deletes it. The name carries the Region and the budget counts only that
+Region's costs, so each Region's deployment in an account has its own budget.
 
 ### Outside CloudFormation
 

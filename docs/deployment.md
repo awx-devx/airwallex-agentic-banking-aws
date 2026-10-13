@@ -30,22 +30,18 @@ inference profile of the deploy Region:
 | `ap-southeast-2` | `au.anthropic.claude-sonnet-5` | `au.anthropic.claude-sonnet-4-5-20250929-v1:0` |
 
 Any other Region that offers Amazon Bedrock AgentCore needs `MODEL_ID` and
-`FALLBACK_MODEL_ID` set to model or inference profile IDs that Region offers; synth fails
-with a message naming them otherwise. The Runtime role may invoke its inference profiles in
-the deploy Region, and the foundation models behind them only through those profiles, so the
-grant does not list the Regions a profile routes to. A plain foundation-model ID (with no
-profile prefix) is granted in the deploy Region only.
+`FALLBACK_MODEL_ID` set to model or inference profile IDs that Region offers. Without them,
+synth fails with a message that names the variables. The Runtime role can invoke its
+inference profiles in the deploy Region. It can invoke the foundation models behind them in
+any Region, but only through those profiles, so the grant lists no destination Regions. A
+plain foundation-model ID (with no profile prefix) is granted in the deploy Region only.
 
-Pass the same `REGION` to every command for one deployment. A run with no `REGION` deploys
-to `us-west-2`, so an existing deployment in another Region is updated only by passing the
-Region it was deployed to (`REGION=ap-southeast-2` for a deployment there). A run with a
-different `REGION` deploys a separate copy; copies in different Regions of one account do not
-clash.
-Setting it once in the shell covers the `make` targets and the `aws` commands below:
-
-```
-export REGION=<region>    # for example us-west-2
-```
+Pass the same `REGION` to every command for a deployment. A `make` run with no `REGION`
+deploys to `us-west-2`, so an existing deployment in another Region is updated only by
+passing the Region it was deployed to (`REGION=ap-southeast-2` for a deployment there). A run
+with a different `REGION` deploys a separate copy; copies in different Regions of the same
+account do not clash. The commands in this runbook read `REGION` from the shell, so setting
+it is the first step of "Bootstrap and deploy". `make` refuses an empty `REGION`.
 
 ## Prerequisites
 
@@ -62,6 +58,15 @@ export REGION=<region>    # for example us-west-2
 
 ## Bootstrap and deploy
 
+Set the Region first. Every command in this runbook reads it, and a new shell needs it set
+again:
+
+```
+export REGION=us-west-2    # or the Region of the deployment being updated
+```
+
+Then build and test:
+
 ```
 make sync
 make check
@@ -73,23 +78,26 @@ in [infra/README.md](../infra/README.md)). Each takes about 4 to 5 minutes, and 
 only dots while it runs. Then bootstrap the account and Region once, and deploy every stack:
 
 ```
-AWS_PROFILE=awx-deploy make bootstrap ACCOUNT=<12-digit id> REGION=$REGION
-AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION=$REGION
+AWS_PROFILE=awx-deploy make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"
+AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"
 ```
 
 `make bootstrap` runs `cdk bootstrap aws://<12-digit id>/<region>` from the repository
-root, once per account and Region. It needs no alert address: the root has no `cdk.json`, so the CDK CLI does not load the
-app. Bootstrapping from `infra/` loads the app, which then fails for want of an alert address.
+root, once per account and Region. It needs no alert address: the root has no `cdk.json`, so
+the CDK CLI does not load the app. Bootstrapping from `infra/` loads the app, which then
+fails for want of an alert address.
 
 `cdk deploy` asks a person at a terminal to approve each stack's AWS Identity and Access
 Management (IAM) changes. A shell with no terminal (a continuous integration (CI) job, a
-coding agent) cannot answer, and the deploy stops before it creates anything. There, review the IAM changes first if you need to
-(`cdk diff` from `infra/`, with the same `-c account=... -c alert_email=...` context), then
-pass the CDK CLI's approval flag through `CDK_ARGS`:
+coding agent) cannot answer, and the deploy stops before it creates anything. There, review
+the IAM changes first if you need to (`cdk diff` from `infra/`, with the same
+`-c account=... -c alert_email=... -c region=...` context, plus `-c model_id` and
+`-c fallback_model_id` if you set them), then pass the CDK CLI's approval flag through
+`CDK_ARGS`:
 
 ```
 AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> \
-    CDK_ARGS="--require-approval never"
+    REGION="$REGION" CDK_ARGS="--require-approval never"
 ```
 
 A full deploy of every stack took about 17 minutes on 8 Oct 2026.
@@ -114,7 +122,7 @@ export AWX_CLIENT_ID AWX_API_KEY
 ( umask 077
   python3 -c 'import json, os; print(json.dumps({"client_id": os.environ["AWX_CLIENT_ID"], "api_key": os.environ["AWX_API_KEY"]}))' \
       > /tmp/awx-secret.json )
-aws --profile awx-deploy --region "$REGION" secretsmanager put-secret-value \
+aws --profile awx-deploy --region "${REGION:?set REGION first}" secretsmanager put-secret-value \
     --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
 rm /tmp/awx-secret.json; unset AWX_CLIENT_ID AWX_API_KEY
 ```
@@ -130,7 +138,7 @@ SECRET_ARN=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.js
 ( umask 077
   uv run --all-packages python -c 'import json; from awx_spine import EnvFileCredentials; c = EnvFileCredentials().get(); print(json.dumps({"client_id": c.client_id, "api_key": c.api_key}))' \
       > /tmp/awx-secret.json )
-aws --profile awx-deploy --region "$REGION" secretsmanager put-secret-value \
+aws --profile awx-deploy --region "${REGION:?set REGION first}" secretsmanager put-secret-value \
     --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
 rm /tmp/awx-secret.json
 ```
@@ -141,8 +149,8 @@ To read another file, pass its path: `EnvFileCredentials(Path("<file>"))`, with
 the later stacks still deploy, read it from the spine stack's outputs instead:
 
 ```
-SECRET_ARN=$(aws --profile awx-deploy --region "$REGION" cloudformation describe-stacks \
-    --stack-name AwxSpine --query "Stacks[0].Outputs[?OutputKey=='AirwallexSecretArn'].OutputValue" \
+SECRET_ARN=$(aws --profile awx-deploy --region "${REGION:?set REGION first}" \
+    cloudformation describe-stacks --stack-name AwxSpine --query "Stacks[0].Outputs[?OutputKey=='AirwallexSecretArn'].OutputValue" \
     --output text)
 ```
 
@@ -214,7 +222,7 @@ symbol:
 
 ```
 POOL=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["UserPoolId"])')
-AWS="aws --profile awx-deploy --region $REGION"
+AWS="aws --profile awx-deploy --region ${REGION:?set REGION first, for example: export REGION=us-west-2}"
 
 create_demo_user() {  # create_demo_user <username> <tenant_id> <requester|approver>
   local name=$1 tenant=$2 group=$3

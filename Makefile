@@ -1,5 +1,5 @@
 .PHONY: sync hooks lint fmt test sandbox-test synth-test secret-scan check bootstrap synth deploy \
-	diagrams help require-target require-account
+	diagrams help require-target require-account require-region
 
 UV ?= uv
 CDK ?= npx -y aws-cdk@2.1144.0
@@ -8,7 +8,7 @@ CDK ?= npx -y aws-cdk@2.1144.0
 REGION ?= us-west-2
 # Context for synth and deploy: ACCOUNT and ALERT_EMAIL are required; KITS (k1,k4), MODEL_ID and
 # FALLBACK_MODEL_ID are optional (the model IDs default to REGION's inference profiles).
-CDK_CONTEXT = -c account=$(ACCOUNT) -c alert_email=$(ALERT_EMAIL) -c region=$(REGION) \
+CDK_CONTEXT = -c account=$(ACCOUNT) -c alert_email=$(ALERT_EMAIL) -c region=$(strip $(REGION)) \
 	$(if $(KITS),-c kits=$(KITS)) $(if $(MODEL_ID),-c model_id=$(MODEL_ID)) \
 	$(if $(FALLBACK_MODEL_ID),-c fallback_model_id=$(FALLBACK_MODEL_ID))
 # Extra CDK CLI arguments for synth and deploy, for example CDK_ARGS="--require-approval never"
@@ -45,13 +45,13 @@ check: sync lint secret-scan test ## sync, lint, secret scan and offline tests
 
 # Runs from the repository root, which has no cdk.json, so the CDK CLI does not load the app
 # (the app needs ALERT_EMAIL; bootstrapping does not).
-bootstrap: require-account ## Bootstrap CDK once per account and Region: make bootstrap ACCOUNT=<12-digit id> [REGION=...]
-	$(CDK) bootstrap aws://$(ACCOUNT)/$(REGION)
+bootstrap: require-account require-region ## Bootstrap CDK once per account and Region: make bootstrap ACCOUNT=<12-digit id> [REGION=...]
+	$(CDK) bootstrap aws://$(ACCOUNT)/$(strip $(REGION))
 
-synth: require-target ## Synthesise every stack: make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [REGION=...] [KITS=k1,k4] [MODEL_ID=...] [FALLBACK_MODEL_ID=...] [CDK_ARGS=...]
+synth: require-target require-region ## Synthesise every stack: make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [REGION=...] [KITS=k1,k4] [MODEL_ID=...] [FALLBACK_MODEL_ID=...] [CDK_ARGS=...]
 	cd infra && $(CDK) synth --all $(CDK_CONTEXT) $(CDK_ARGS)
 
-deploy: require-target ## Deploy every stack: make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [REGION=...] [KITS=k1,k4] [MODEL_ID=...] [FALLBACK_MODEL_ID=...] [CDK_ARGS=...]
+deploy: require-target require-region ## Deploy every stack: make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [REGION=...] [KITS=k1,k4] [MODEL_ID=...] [FALLBACK_MODEL_ID=...] [CDK_ARGS=...]
 	cd infra && $(CDK) deploy --all --outputs-file cdk-outputs.json $(CDK_CONTEXT) $(CDK_ARGS)
 
 diagrams: ## Regenerate the architecture diagrams [DRAWIO=/path/to/drawio to render PNGs]
@@ -71,6 +71,12 @@ require-account:
 		echo "  make $(MAKECMDGOALS) ACCOUNT=111122223333" >&2; \
 		exit 2; \
 	fi
+
+# An empty REGION (REGION=$REGION with REGION unset in the shell) overrides the default above,
+# so it is refused here rather than bootstrapping aws://<id>/ or synthesising for no Region.
+# $(error) also stops `make -n`.
+require-region:
+	$(if $(strip $(REGION)),@:,$(error REGION is empty. Set it first, for example: export REGION=us-west-2))
 
 help: ## List every target
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z-]*:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)

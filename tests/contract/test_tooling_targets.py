@@ -108,6 +108,34 @@ def test_region_and_model_ids_reach_synth_and_deploy(target):
 
 
 @needs_make
+@pytest.mark.parametrize("target", ["bootstrap", "synth", "deploy"])
+@pytest.mark.parametrize("region", ["", "  "], ids=["empty", "whitespace"])
+def test_an_empty_region_is_refused_before_cdk_runs(target, region):
+    # `REGION=$REGION` with REGION unset in the shell passes an empty value, which overrides
+    # the Makefile default; it must stop with a message, even under `make -n`.
+    unset = {"ALERT_EMAIL", "ACCOUNT", "CDK_ARGS", "REGION", "MODEL_ID", "FALLBACK_MODEL_ID"}
+    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [
+            MAKE,
+            "-n",
+            "-C",
+            str(REPO),
+            target,
+            "ACCOUNT=111122223333",
+            "ALERT_EMAIL=you@example.com",
+            f"REGION={region}",
+        ],
+        capture_output=True,
+        text=True,
+        env={k: v for k, v in os.environ.items() if k not in unset},
+    )
+    assert done.returncode != 0
+    assert "REGION is empty" in done.stderr
+    assert "export REGION=us-west-2" in done.stderr
+    assert "aws-cdk" not in done.stdout
+
+
+@needs_make
 def test_sandbox_test_prints_skip_reasons():
     out = make_dry_run("sandbox-test")
     line = next(line for line in out.splitlines() if "pytest" in line)

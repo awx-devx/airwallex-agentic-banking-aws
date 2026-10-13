@@ -206,7 +206,21 @@ def discover(
     """Table names and the secret ARN from the spine stack: its outputs (TenantsTableName,
     AirwallexSecretArn) and its resources (the Ledger table has no output, so it is found by
     its logical id). State machines are found by their fixed awx-<kit>-<action> names."""
-    stack = cfn.describe_stacks(StackName=spine_stack)["Stacks"][0]
+    from botocore.exceptions import ClientError
+
+    try:
+        stack = cfn.describe_stacks(StackName=spine_stack)["Stacks"][0]
+    except ClientError as exc:
+        error = exc.response.get("Error") or {}
+        if error.get("Code") != "ValidationError" or "does not exist" not in str(
+            error.get("Message", "")
+        ):
+            raise
+        region = getattr(getattr(cfn, "meta", None), "region_name", None) or "the client's Region"
+        raise DeployError(
+            f"stack {spine_stack} not found in {region}; pass --region with the Region it was "
+            "deployed to"
+        ) from None
     outputs = {o["OutputKey"]: o["OutputValue"] for o in stack.get("Outputs", [])}
     ledger = overrides.get("ledger_table")
     if not ledger:

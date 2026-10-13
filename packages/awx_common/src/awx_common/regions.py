@@ -4,11 +4,11 @@
 no REGION, `awx-deploy` with no `--region` and no outputs file, the Runtime's local fallback).
 
 The agent's models are Claude Sonnet 5 (primary) and Claude Sonnet 4.5 (fallback). Their
-default IDs are the geographic cross-Region inference profiles of the deploy Region: the
-prefix comes from `INFERENCE_PROFILE_PREFIX`, which lists only Regions that offer Amazon
-Bedrock AgentCore Runtime and where the primary and fallback profile IDs were confirmed with
-`aws bedrock list-inference-profiles` in that Region. A Region outside the table needs the
-model IDs passed explicitly (MODEL_ID and FALLBACK_MODEL_ID).
+default IDs are the geographic cross-Region inference profiles of the deploy Region. The
+prefix comes from `INFERENCE_PROFILE_PREFIX`. That table lists only Regions that offer Amazon
+Bedrock AgentCore Runtime and where `aws bedrock list-inference-profiles` returned the
+primary and fallback profile IDs on 13 Oct 2026. A Region outside the table needs the model
+IDs passed explicitly (MODEL_ID and FALLBACK_MODEL_ID).
 """
 
 from __future__ import annotations

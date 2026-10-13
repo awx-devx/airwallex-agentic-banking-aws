@@ -90,12 +90,41 @@ def test_ireland_gets_the_eu_profiles():
     _assert_profile_grant(template, "eu-west-1", "eu")
 
 
-def test_a_region_outside_the_table_fails_synth_naming_the_overrides():
+@pytest.mark.parametrize(
+    ("overrides", "missing"),
+    [
+        (
+            {},
+            "MODEL_ID (CDK context model_id) and FALLBACK_MODEL_ID (CDK context fallback_model_id)",
+        ),
+        ({"model_id": f"global.{SONNET_5}"}, "FALLBACK_MODEL_ID (CDK context fallback_model_id)"),
+        ({"fallback_model_id": f"jp.{SONNET_4_5}"}, "MODEL_ID (CDK context model_id)"),
+    ],
+    ids=["no-override", "only-model-id", "only-fallback-model-id"],
+)
+def test_a_region_outside_the_table_fails_synth_naming_the_overrides(overrides, missing):
     with pytest.raises(ValueError, match="no default model IDs") as caught:
-        _agent(region="ap-northeast-1")
+        _agent(region="ap-northeast-1", **overrides)
     message = str(caught.value)
-    for name in ("REGION=ap-northeast-1", "MODEL_ID", "FALLBACK_MODEL_ID"):
-        assert name in message
+    assert "REGION=ap-northeast-1" in message
+    # Only the variables still missing are named.
+    assert f"Pass {missing} with model or inference profile IDs" in message
+
+
+@pytest.mark.parametrize("region", [DEFAULT_REGION, "ap-southeast-2"])
+def test_each_regions_budget_has_its_own_name_and_counts_its_own_region(region):
+    os.environ["AWX_SKIP_RUNTIME_DEPS"] = "1"
+    from aws_cdk import App
+    from aws_cdk.assertions import Template
+
+    from infra.app import build_app
+
+    app = build_app(App(context={"account": ACCOUNT, "region": region}), kits=())
+    template = Template.from_stack(app.node.find_child("AwxSpine"))
+    (budget,) = template.find_resources("AWS::Budgets::Budget").values()
+    data = budget["Properties"]["Budget"]
+    assert data["BudgetName"] == f"awx-poc-monthly-{region}"
+    assert data["CostFilters"] == {"Region": [region]}
 
 
 def test_a_region_outside_the_table_synthesises_with_both_overrides():

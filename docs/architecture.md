@@ -150,7 +150,7 @@ import time happens in a process that holds no construct tree.
 | Python | 3.12, one uv workspace |
 | AWS CDK | `aws-cdk-lib` 2.272.0, `constructs` 10.8.1, `cdk-nag` 2.38.2, CLI `aws-cdk@2.1144.0` through `npx` |
 | Agent | Strands Agents (`strands-agents` 1.58.0) on Amazon Bedrock AgentCore Runtime (`bedrock-agentcore` 1.24.0), tools through AgentCore Gateway Lambda targets |
-| Model | Claude Sonnet 5, falling back to Claude Sonnet 4.5 (`anthropic.claude-sonnet-4-5-20250929-v1:0`), through the deploy Region's geographic inference profiles (`us.` by default; see "Region and models" in [deployment.md](deployment.md)) |
+| Model | Claude Sonnet 5 (`anthropic.claude-sonnet-5`), falling back to Claude Sonnet 4.5 (`anthropic.claude-sonnet-4-5-20250929-v1:0`), through the deploy Region's geographic inference profiles (`us.` by default, see "Region and models" in [deployment.md](deployment.md)) |
 | AWS SDK | `boto3` 1.43.108 |
 | Token verification | `pyjwt` 2.15.1 with `cryptography` 50.0.2, RS256 only |
 | Compute | AWS Lambda on arm64, Python 3.12; Step Functions Standard |

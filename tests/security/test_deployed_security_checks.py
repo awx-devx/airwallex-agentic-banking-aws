@@ -266,8 +266,10 @@ def test_clients_are_made_in_the_region_the_outputs_file_names(checks, tmp_path)
         assert client.meta.region_name == "eu-west-1"
 
 
-def test_an_outputs_file_without_a_region_uses_the_default_region(checks, tmp_path):
-    from awx_common.regions import DEFAULT_REGION
-
-    checks.load_outputs(_outputs(tmp_path, {}))
-    assert checks.sm.meta.region_name == DEFAULT_REGION
+def test_an_outputs_file_without_a_region_is_refused(checks, tmp_path):
+    path = _outputs(tmp_path, {})
+    with pytest.raises(SystemExit) as caught:
+        checks.load_outputs(path)
+    message = str(caught.value)
+    assert str(path) in message
+    assert "AwxAgentStack.AwxRegion" in message

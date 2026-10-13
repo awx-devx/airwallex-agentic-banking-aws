@@ -11,6 +11,7 @@ lookups, so it needs no credentials. cdk-nag AwsSolutions runs over every stack.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -27,6 +28,7 @@ import aws_cdk as cdk  # noqa: E402
 from awx_common.kits import KIT_DIRS  # noqa: E402
 from awx_common.regions import (  # noqa: E402
     DEFAULT_REGION,
+    INFERENCE_PROFILE_PREFIX,
     UnsupportedRegionError,
     default_model_ids,
 )
@@ -50,23 +52,62 @@ def target_account(app: cdk.App) -> str:
     return str(account)
 
 
+REGION_CODE = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d+$")
+
+
 def target_region(app: cdk.App) -> str:
-    """The Region to build for: `-c region=<region>`, else DEFAULT_REGION."""
-    return str(app.node.try_get_context("region") or DEFAULT_REGION)
+    """The Region to build for: `-c region=<region>`, else DEFAULT_REGION when the context is
+    absent. A present but empty value (REGION=$REGION with REGION unset) is refused, never
+    read as the default, and so is anything that is not a Region code."""
+    value = app.node.try_get_context("region")
+    if value is None:
+        return DEFAULT_REGION
+    region = str(value).strip()
+    if not region:
+        raise ValueError(
+            "REGION is empty (-c region= has no value). Set it to the Region to deploy to, "
+            "for example: export REGION=us-west-2"
+        )
+    if not REGION_CODE.match(region):
+        raise ValueError(f"REGION={region} is not an AWS Region code such as us-west-2")
+    return region
+
+
+def _model_id_context(app: cdk.App, key: str, variable: str) -> str | None:
+    value = str(app.node.try_get_context(key) or "").strip()
+    if value.startswith("arn:"):
+        raise ValueError(
+            f"{variable}={value} is an ARN. Pass a model ID or an inference profile ID, "
+            "for example us.anthropic.claude-sonnet-5; ARNs are not supported."
+        )
+    return value or None
 
 
 def target_model_ids(app: cdk.App, region: str) -> tuple[str, str]:
     """(primary, fallback) model IDs: `-c model_id` and `-c fallback_model_id`, each falling
-    back to the Region's default inference profile. A Region with no defaults needs the pair."""
-    primary = app.node.try_get_context("model_id")
-    fallback = app.node.try_get_context("fallback_model_id")
+    back to the Region's default inference profile. A Region with no defaults needs
+    `model_id` and `fallback_model_id`."""
+    primary = _model_id_context(app, "model_id", "MODEL_ID")
+    fallback = _model_id_context(app, "fallback_model_id", "FALLBACK_MODEL_ID")
     if primary and fallback:
-        return str(primary), str(fallback)
+        return primary, fallback
     try:
         default_primary, default_fallback = default_model_ids(region)
-    except UnsupportedRegionError as exc:
-        raise ValueError(str(exc)) from None
-    return str(primary or default_primary), str(fallback or default_fallback)
+    except UnsupportedRegionError:
+        missing = [
+            f"{variable} (CDK context {key})"
+            for variable, key, given in (
+                ("MODEL_ID", "model_id", primary),
+                ("FALLBACK_MODEL_ID", "fallback_model_id", fallback),
+            )
+            if not given
+        ]
+        raise ValueError(
+            f"REGION={region} has no default model IDs (supported: "
+            f"{', '.join(sorted(INFERENCE_PROFILE_PREFIX))}). Pass {' and '.join(missing)} "
+            "with model or inference profile IDs that this Region offers."
+        ) from None
+    return primary or default_primary, fallback or default_fallback
 
 
 def build_app(

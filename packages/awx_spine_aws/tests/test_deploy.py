@@ -13,6 +13,7 @@ import io
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import boto3
 import pytest
@@ -458,6 +459,30 @@ def test_discovery_reads_the_spine_stack():
     )
     assert d.secret_arn.endswith(":secret:s")
     assert deploy.discover(_Cfn(), ddb=None, sfn=None, ledger_table="L").ledger_table == "L"
+
+
+def test_a_missing_spine_stack_names_the_stack_and_the_region_searched():
+    from botocore.exceptions import ClientError
+
+    class Missing(_Cfn):
+        meta = SimpleNamespace(region_name="eu-west-1")
+
+        def describe_stacks(self, StackName):
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ValidationError",
+                        "Message": f"Stack with id {StackName} does not exist",
+                    }
+                },
+                "DescribeStacks",
+            )
+
+    with pytest.raises(deploy.DeployError) as caught:
+        deploy.discover(Missing(), ddb=None, sfn=None)
+    message = str(caught.value)
+    assert "AwxSpine not found in eu-west-1" in message
+    assert "pass --region" in message
 
 
 def test_the_cli_runs_put_run_and_apply(world, tmp_path):

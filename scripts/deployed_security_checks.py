@@ -6,8 +6,8 @@ written the stack outputs to infra/cdk-outputs.json:
     ... scripts/deployed_security_checks.py --outputs path/to/cdk-outputs.json
 
 The checks run in the Region the stacks were deployed to (the AwxRegion output of
-AwxAgentStack), falling back to awx_common.regions.DEFAULT_REGION for an outputs file without
-it. Prints one PASS/FAIL line per check and no secret, token or password.
+AwxAgentStack); an outputs file without it is refused. Prints one PASS/FAIL line per check
+and no secret, token or password.
 
 Signs in as the demo users `demo-platform-requester`, `demo-k6-operator` and
 `demo-k5-operator-approver` (docs/deployment.md, "Demo users").
@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any
 
 import boto3
-from awx_common.regions import DEFAULT_REGION
 
 REGION = ""  # the deployment's Region: AwxAgentStack.AwxRegion in the outputs file
 # The file `cdk deploy --outputs-file cdk-outputs.json` writes when run from infra/.
@@ -56,7 +55,12 @@ def load_outputs(path: Path) -> None:
     GW = OUT["AwxAgentStack"]["AwxGatewayUrl"]
     CLIENT = OUT["AwxAgentStack"]["AwxUserPoolClientId"]
     SECRET_ARN = OUT["AwxSpine"]["AirwallexSecretArn"]
-    REGION = OUT["AwxAgentStack"].get("AwxRegion") or DEFAULT_REGION
+    REGION = OUT["AwxAgentStack"].get("AwxRegion")
+    if not REGION:
+        raise SystemExit(
+            f"{path}: no AwxAgentStack.AwxRegion output; redeploy, or pass the outputs file "
+            "that make deploy wrote"
+        )
     make_clients(REGION)
 
 
