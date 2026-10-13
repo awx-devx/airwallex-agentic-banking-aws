@@ -300,7 +300,7 @@ def test_the_page_loop_is_bounded_and_fails_closed():
 def test_the_prompt_forbids_quoting_values_no_tool_returned():
     from awx_agent.runtime.prompt import system_prompt
 
-    p = system_prompt("k7")
+    p = " ".join(system_prompt("k7").split())
     assert "that a tool returned in this conversation" in p
     assert "I could not reach the tools" in p
 

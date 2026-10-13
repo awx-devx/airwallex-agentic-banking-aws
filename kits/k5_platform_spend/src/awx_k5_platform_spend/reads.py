@@ -101,24 +101,32 @@ def read_card_transactions(raw: Mapping[str, Any], ctx: PolicyContext) -> Mappin
 
 def read_bridge_position(raw: Mapping[str, Any], ctx: PolicyContext) -> Mapping[str, Any]:
     """This tenant's own bridge position only: no platform capital, headroom, floor or other
-    tenant's figures (they would reach the tenant caller), and no account identifiers."""
+    tenant's figures (they would reach the tenant caller), and no account identifiers.
+
+    Each queued shortfall carries its obligation's `due_on` from the caller's own obligation in
+    the current setup, or None when the setup has no such obligation for the caller, so the
+    agent can state a due date only when the kit holds one."""
     from .book import queue_key
     from .workflow import book_for, current_setup
 
     strict(raw, {}, {})
     if (refused := _disagrees(ctx)) is not None:
         return refused
-    book = book_for(ctx, current_setup(ctx))
+    setup = current_setup(ctx)
+    book = book_for(ctx, setup)
     record = book.tenants.record(ctx.tenant)
     ledger = book.ledger
     tenant_holds = [h for h in ledger.holds() if h.tenant_id == record.tenant_id]
     queued = []
     for item in book.store.query(queue_key(record.tenant_id, "")):
         if not item.value.get("removed"):
+            obligation = setup.obligations.get(item.value["obligation_id"])
+            own = obligation is not None and obligation.tenant_id == record.tenant_id
             queued.append(
                 {
                     "obligation_ref": item.value["obligation_id"],
                     "shortfall": str(item.value["shortfall"]),
+                    "due_on": obligation.due_on.isoformat() if own else None,
                 }
             )
     return {

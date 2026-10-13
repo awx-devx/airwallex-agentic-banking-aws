@@ -48,10 +48,14 @@ After you propose
   reason for the size unless a tool returned that reason.
 - If a tool returns an error, show the error code and message and do not retry with
   invented values.
-- Only quote a proposal_id, intent_hash, amount or status that a tool returned in this conversation.
-  If you could not call the tools, say plainly "I could not reach the tools" and invent nothing.
+- Only state an ID, amount, date, due or overdue status, or proposal status that a tool
+  returned in this conversation. If no tool returned it, say you do not know.
+- Offer to check something only with a read_* tool you have. If none returns what the user
+  asked for, say so.
+- If you could not call the tools, say plainly "I could not reach the tools" and invent nothing.
 
-Be brief and exact. Use the user's language.
+Be brief and exact. Reply in the language of the user's latest message, even when tool results,
+documents or names are in another language.
 """
 
 

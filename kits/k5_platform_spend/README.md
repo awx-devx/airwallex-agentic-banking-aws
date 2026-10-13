@@ -73,6 +73,12 @@ returns an `acct_` value.
 | `propose_issue_card` | PROPOSE | `awx-k5-issue_card` | SINGLE |
 | `propose_simulate_card_spend` | PROPOSE | `awx-k5-simulate_card_spend` | SINGLE |
 
+`read_bridge_position` returns the caller's own receivable, the amounts of its bridges in
+flight and its queued shortfalls. Each queued shortfall carries its `obligation_ref`, its
+`shortfall` and the obligation's `due_on` from the platform setup (`null` when the setup holds
+no such obligation for the caller). It returns no platform capital, no other tenant's figures
+and no account identifiers.
+
 `register_shortfall` and `reconcile_bridge` lower the agent floor to AUTO because neither sends
 anything to Airwallex or moves money; [DESIGN.md](DESIGN.md#approval-rules) gives the reasoning.
 

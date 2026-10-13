@@ -562,3 +562,58 @@ def test_transaction_time_parses_sandbox_and_fake_formats(raw):
     assert got is not None
     assert got.replace(microsecond=0) == datetime(2026, 10, 6, 4, 49, 6, tzinfo=UTC)
     assert _transaction_time({"transaction_date": "not a date"}) is None
+
+
+def test_read_bridge_position_gives_each_queued_shortfall_its_own_due_date():
+    from datetime import timedelta
+
+    from awx_k5_platform_spend.allocator import BridgeCandidate
+    from awx_k5_platform_spend.book import Obligation
+
+    today = NOW.date()
+    obligations = [
+        Obligation("ob-a1", "t-alpha", usd("500"), today, today + timedelta(days=2)),
+        Obligation(
+            "ob-b1", "t-bravo", usd("700"), today + timedelta(days=1), today + timedelta(days=3)
+        ),
+    ]
+    p = Platform(wallets={"t-alpha": "100", "t-bravo": "100"}, obligations=obligations)
+    configure_platform(p.setup)
+    try:
+
+        def queue(tenant, obligation_id, due_on):
+            p.book.register_candidate(
+                BridgeCandidate(
+                    tenant, obligation_id, usd("400"), due_on, due_on + timedelta(days=2)
+                ),
+                observed_at=NOW,
+            )
+
+        queue("t-alpha", "ob-a1", today)
+        # A queue entry naming another tenant's obligation, and one the setup does not hold:
+        # no date of theirs may reach the caller.
+        queue("t-alpha", "ob-b1", today)
+        queue("t-alpha", "ob-gone", today)
+        queue("t-bravo", "ob-b1", today + timedelta(days=1))
+        ctx = PolicyContext(
+            p.tenant("t-alpha"),
+            NOW,
+            p.fake.read,
+            store=InMemoryKitStore(),
+            platform_store=p.platform_store,
+        )
+        position = READS["read_bridge_position"]({}, ctx)
+        queued = {q["obligation_ref"]: q for q in position["queued_shortfalls"]}
+        assert queued == {
+            "ob-a1": {
+                "obligation_ref": "ob-a1",
+                "shortfall": str(usd("400")),
+                "due_on": today.isoformat(),
+            },
+            "ob-b1": {"obligation_ref": "ob-b1", "shortfall": str(usd("400")), "due_on": None},
+            "ob-gone": {"obligation_ref": "ob-gone", "shortfall": str(usd("400")), "due_on": None},
+        }
+        assert (today + timedelta(days=1)).isoformat() not in str(position)
+        assert "acct_" not in str(position)
+    finally:
+        configure_platform(None)

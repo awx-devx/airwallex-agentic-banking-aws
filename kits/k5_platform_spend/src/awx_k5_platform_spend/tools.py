@@ -70,7 +70,8 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "read_bridge_position",
         ToolKind.READ,
-        "The customer's own bridge receivable, bridges in flight and queued shortfalls.",
+        "The customer's own bridge receivable, bridges in flight and queued shortfalls, each "
+        "queued shortfall with its obligation's due date (due_on, null if unknown).",
         _schema({}),
     ),
     ToolSpec(
