@@ -44,15 +44,16 @@ def test_the_deployed_reader_timeout_fits_the_margin(monkeypatch):
     root = __import__("pathlib").Path(__file__).resolve().parents[3]
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
+    from awx_common.regions import DEFAULT_REGION
     from infra.app import build_app
     from infra.constructs.kit_workflow import STEP_HANDLER, KitWorkflow
 
     module = types.ModuleType(MODULE)
     module.SPECS = {"pay_supplier": toy.toy_spec()}
     monkeypatch.setitem(sys.modules, MODULE, module)
-    app = cdk.App(context={"account": "111122223333", "region": "ap-southeast-2"})
+    app = cdk.App(context={"account": "111122223333", "region": DEFAULT_REGION})
     build_app(app)
-    env = cdk.Environment(account="111122223333", region="ap-southeast-2")
+    env = cdk.Environment(account="111122223333", region=DEFAULT_REGION)
     kit = cdk.Stack(app, "MarginKit", env=env)
     spine = app.node.find_child("AwxSpine")
     from infra.kit_manifest import parse_workflow

@@ -562,6 +562,37 @@ def test_the_secret_is_read_with_the_profiles_client(monkeypatch):
     assert secrets.calls == ["arn:aws:secretsmanager:x:1:secret:s"]
 
 
+def test_region_comes_from_the_flag_then_the_outputs_file_then_the_default(tmp_path):
+    from awx_common.regions import DEFAULT_REGION
+
+    outputs = tmp_path / "cdk-outputs.json"
+    assert deploy.resolve_region(None, outputs) == DEFAULT_REGION
+    outputs.write_text(json.dumps({"AwxAgentStack": {"AwxRegion": "eu-west-1"}}))
+    assert deploy.resolve_region(None, outputs) == "eu-west-1"
+    assert deploy.resolve_region("ca-central-1", outputs) == "ca-central-1"
+    outputs.write_text(json.dumps({"AwxSpine": {}}))
+    with pytest.raises(deploy.DeployError, match="pass --region"):
+        deploy.resolve_region(None, outputs)
+
+
+def test_the_session_uses_the_outputs_files_region_with_no_flag(monkeypatch, tmp_path):
+    outputs = tmp_path / "cdk-outputs.json"
+    outputs.write_text(json.dumps({"AwxAgentStack": {"AwxRegion": "eu-west-2"}}))
+    monkeypatch.setattr(deploy, "OUTPUTS_FILE", outputs)
+    made: list[tuple] = []
+
+    class _Session:
+        def __init__(self, profile_name=None, region_name=None):
+            made.append((profile_name, region_name))
+
+        def client(self, name, *a, **kw):
+            return {"cloudformation": _Cfn(), "secretsmanager": _Secrets()}.get(name, object())
+
+    monkeypatch.setattr(boto3, "Session", _Session)
+    deploy.deployment_from_args(deploy.parser().parse_args(["plan", "x"]))
+    assert made == [(None, "eu-west-2")]
+
+
 class _PagedSfn:
     """An empty first page with a nextToken, a RUNNING execution on page 2."""
 

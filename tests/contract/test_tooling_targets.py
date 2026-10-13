@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from awx_common.regions import DEFAULT_REGION
 
 REPO = Path(__file__).resolve().parents[2]
 CONTRACT_DIR = REPO / "tests" / "contract"
@@ -26,7 +27,8 @@ needs_make = pytest.mark.skipif(MAKE is None, reason="make is not installed")
 
 
 def make_dry_run(*args: str) -> str:
-    env = {k: v for k, v in os.environ.items() if k not in {"ALERT_EMAIL", "ACCOUNT", "CDK_ARGS"}}
+    unset = {"ALERT_EMAIL", "ACCOUNT", "CDK_ARGS", "REGION", "MODEL_ID", "FALLBACK_MODEL_ID"}
+    env = {k: v for k, v in os.environ.items() if k not in unset}
     done = subprocess.run(  # noqa: S603 - fixed argv, no shell
         [MAKE, "-n", "-C", str(REPO), *args],
         capture_output=True,
@@ -43,7 +45,7 @@ def test_bootstrap_needs_only_the_account_and_does_not_load_the_app():
     cdk_lines = [line for line in out.splitlines() if "aws-cdk" in line]
     assert len(cdk_lines) == 1
     line = cdk_lines[0]
-    assert "bootstrap aws://111122223333/ap-southeast-2" in line
+    assert f"bootstrap aws://111122223333/{DEFAULT_REGION}" in line
     # Run from the repository root, where no cdk.json names the app.
     assert "cd infra" not in line
     assert "alert_email" not in line
@@ -74,6 +76,35 @@ def test_cdk_args_reach_synth_and_deploy(target):
     line = next(line for line in out.splitlines() if "aws-cdk" in line)
     assert f"aws-cdk@2.1144.0 {target} --all" in line
     assert line.rstrip().endswith("--require-approval never")
+
+
+def test_makefile_default_region_is_the_python_default():
+    lines = (REPO / "Makefile").read_text().splitlines()
+    (line,) = [line for line in lines if line.startswith("REGION ?=")]
+    assert line.split("?=", 1)[1].strip() == DEFAULT_REGION
+
+
+@needs_make
+def test_bootstrap_uses_the_region_given():
+    out = make_dry_run("bootstrap", "ACCOUNT=111122223333", "REGION=eu-west-1")
+    line = next(line for line in out.splitlines() if "aws-cdk" in line)
+    assert "bootstrap aws://111122223333/eu-west-1" in line
+
+
+@needs_make
+@pytest.mark.parametrize("target", ["synth", "deploy"])
+def test_region_and_model_ids_reach_synth_and_deploy(target):
+    base = ("ACCOUNT=111122223333", "ALERT_EMAIL=you@example.com")
+    line = next(x for x in make_dry_run(target, *base).splitlines() if "aws-cdk" in x)
+    assert f"-c region={DEFAULT_REGION}" in line
+    assert "model_id" not in line
+    out = make_dry_run(
+        target, *base, "REGION=eu-west-1", "MODEL_ID=m.primary", "FALLBACK_MODEL_ID=m.fallback"
+    )
+    line = next(x for x in out.splitlines() if "aws-cdk" in x)
+    assert "-c region=eu-west-1" in line
+    assert "-c model_id=m.primary" in line
+    assert "-c fallback_model_id=m.fallback" in line
 
 
 @needs_make

@@ -1,7 +1,9 @@
 """CDK entry point: `npx -y aws-cdk@2.1144.0 synth` from infra/ (cdk.json runs this module).
 
-The account comes from `-c account=<id>` or CDK_DEFAULT_ACCOUNT, the region from
-`-c region=<region>` (default ap-southeast-2), and the alarm and budget email from
+The account comes from `-c account=<id>` or CDK_DEFAULT_ACCOUNT, the Region from
+`-c region=<region>` (default awx_common.regions.DEFAULT_REGION), the agent's model IDs from
+`-c model_id=<id>` and `-c fallback_model_id=<id>` (default: the Region's inference profiles,
+awx_common.regions.default_model_ids), and the alarm and budget email from
 `-c alert_email=<address>` or AWX_ALERT_EMAIL. Synth makes no AWS calls and no context
 lookups, so it needs no credentials. cdk-nag AwsSolutions runs over every stack.
 """
@@ -23,14 +25,17 @@ if str(_INFRA.parent) not in sys.path:
 
 import aws_cdk as cdk  # noqa: E402
 from awx_common.kits import KIT_DIRS  # noqa: E402
+from awx_common.regions import (  # noqa: E402
+    DEFAULT_REGION,
+    UnsupportedRegionError,
+    default_model_ids,
+)
 from cdk_nag import AwsSolutionsChecks  # noqa: E402
 
 from infra.kit_manifest import KitManifest, load_manifests  # noqa: E402
 from infra.stacks.agent_stack import AgentStack  # noqa: E402
 from infra.stacks.kit_stack import KitStack  # noqa: E402
 from infra.stacks.spine_stack import SpineStack  # noqa: E402
-
-DEFAULT_REGION = "ap-southeast-2"
 
 
 def target_account(app: cdk.App) -> str:
@@ -43,6 +48,25 @@ def target_account(app: cdk.App) -> str:
             "no target account: pass -c account=<12-digit id> or set CDK_DEFAULT_ACCOUNT"
         )
     return str(account)
+
+
+def target_region(app: cdk.App) -> str:
+    """The Region to build for: `-c region=<region>`, else DEFAULT_REGION."""
+    return str(app.node.try_get_context("region") or DEFAULT_REGION)
+
+
+def target_model_ids(app: cdk.App, region: str) -> tuple[str, str]:
+    """(primary, fallback) model IDs: `-c model_id` and `-c fallback_model_id`, each falling
+    back to the Region's default inference profile. A Region with no defaults needs the pair."""
+    primary = app.node.try_get_context("model_id")
+    fallback = app.node.try_get_context("fallback_model_id")
+    if primary and fallback:
+        return str(primary), str(fallback)
+    try:
+        default_primary, default_fallback = default_model_ids(region)
+    except UnsupportedRegionError as exc:
+        raise ValueError(str(exc)) from None
+    return str(primary or default_primary), str(fallback or default_fallback)
 
 
 def build_app(
@@ -71,16 +95,15 @@ def build_app(
         unknown = sorted(set(kits) - set(KIT_DIRS))
         if unknown:
             raise ValueError(f"-c kits names unknown kits {unknown}")
-    env = cdk.Environment(
-        account=target_account(app),
-        region=app.node.try_get_context("region") or DEFAULT_REGION,
-    )
+    region = target_region(app)
+    model_ids = target_model_ids(app, region)
+    env = cdk.Environment(account=target_account(app), region=region)
     selected = list(KIT_DIRS if kits is None else kits)
     given = dict(manifests or {})
     loaded = load_manifests([k for k in selected if k not in given])
     built_manifests = {k: given.get(k) or loaded[k] for k in selected}
     spine = SpineStack(app, "AwxSpine", env=env)
-    agent = AgentStack(app, "AwxAgentStack", spine=spine, env=env)
+    agent = AgentStack(app, "AwxAgentStack", spine=spine, model_ids=model_ids, env=env)
     # spine <- kit stacks <- agent stack: each kit's tools live in the agent stack and point
     # at the kit's state machines; no kit stack references the agent stack.
     for kit in selected:

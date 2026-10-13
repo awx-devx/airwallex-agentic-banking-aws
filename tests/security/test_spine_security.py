@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from aws_cdk.assertions import Annotations, Match, Template
+from awx_common.regions import DEFAULT_REGION
 
 pytestmark = pytest.mark.synth
 
@@ -504,12 +505,12 @@ def test_kms_key_policy_admits_logs_and_agentcore_only_from_this_account(templat
         svc = stmt.get("Principal", {}).get("Service")
         if svc:
             services[text(svc)] = stmt
-    assert any("logs.ap-southeast-2" in k for k in services)
+    assert any(f"logs.{DEFAULT_REGION}" in k for k in services)
     agentcore = services['"bedrock-agentcore.amazonaws.com"']
     assert agentcore["Condition"] == {"StringEquals": {"aws:SourceAccount": "111122223333"}}
-    logs_stmt = next(v for k, v in services.items() if "logs.ap-southeast-2" in k)
+    logs_stmt = next(v for k, v in services.items() if f"logs.{DEFAULT_REGION}" in k)
     arn = logs_stmt["Condition"]["ArnLike"]["kms:EncryptionContext:aws:logs:arn"]
-    assert arn == "arn:aws:logs:ap-southeast-2:111122223333:log-group:*"
+    assert arn == f"arn:aws:logs:{DEFAULT_REGION}:111122223333:log-group:*"
     for stmt in services.values():
         assert "Condition" in stmt
 

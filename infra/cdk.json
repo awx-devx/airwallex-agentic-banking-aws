@@ -1,7 +1,6 @@
 {
   "app": "uv run --frozen --all-packages python app.py",
   "context": {
-    "region": "ap-southeast-2",
     "@aws-cdk/core:checkSecretUsage": true
   }
 }

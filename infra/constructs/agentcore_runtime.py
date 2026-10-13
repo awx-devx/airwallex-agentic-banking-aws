@@ -16,17 +16,9 @@ from aws_cdk import aws_bedrockagentcore as agentcore
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_iam as iam
 from awx_agent.nag import ACCT, REGION, regex, suppress
-from awx_agent.runtime.app import DEFAULT_FALLBACK_MODEL_ID, DEFAULT_MODEL_ID
 from awx_agent.staging import RUNTIME_ENTRY, stage_runtime
+from awx_common.regions import foundation_model, is_inference_profile
 from constructs import Construct
-
-# Australian cross-Region inference profiles route to these Regions.
-AU_INFERENCE_REGIONS = ("ap-southeast-2", "ap-southeast-4")
-
-
-def _foundation_model(profile_id: str) -> str:
-    """au.anthropic.claude-x -> anthropic.claude-x (the model behind a geo profile)."""
-    return profile_id.split(".", 1)[1] if profile_id.startswith("au.") else profile_id
 
 
 class AgentCoreRuntime(Construct):
@@ -38,7 +30,7 @@ class AgentCoreRuntime(Construct):
         user_pool: cognito.IUserPool,
         client: cognito.IUserPoolClient,
         gateway_url: str,
-        model_ids: Sequence[str] = (DEFAULT_MODEL_ID, DEFAULT_FALLBACK_MODEL_ID),
+        model_ids: Sequence[str],
     ) -> None:
         super().__init__(scope, id)
         stack = Stack.of(self)
@@ -68,69 +60,88 @@ class AgentCoreRuntime(Construct):
             },
         )
 
+        # Inference profiles in the stack Region, and the foundation models behind them in any
+        # Region, reachable only through those profiles (the bedrock:InferenceProfileArn
+        # condition). The profile's destination Regions are AWS's to change, so the grant
+        # names none. The trailing * covers a dated or versioned model ID behind a profile.
+        # A plain foundation-model ID (no profile prefix) is granted in the stack Region only.
+        invoke = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+        profile_ids = [m for m in model_ids if is_inference_profile(m)]
+        plain_ids = [m for m in model_ids if not is_inference_profile(m)]
         profiles = [
             f"arn:aws:bedrock:{stack.region}:{stack.account}:inference-profile/{m}"
-            for m in model_ids
+            for m in profile_ids
         ]
-        # The trailing * covers a dated or versioned model ID behind the geo profile, so the
-        # grant does not depend on the exact foundation-model ID AWS routes the profile to.
-        models = [
-            f"arn:aws:bedrock:{r}::foundation-model/{_foundation_model(m)}*"
-            for m in model_ids
-            for r in AU_INFERENCE_REGIONS
+        routed = [
+            f"arn:aws:bedrock:*::foundation-model/{foundation_model(m)}*" for m in profile_ids
         ]
-        self.runtime.add_to_role_policy(
-            iam.PolicyStatement(
-                sid="InvokeAgentModel",
-                actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-                resources=[*profiles, *models],
+        direct = [f"arn:aws:bedrock:{stack.region}::foundation-model/{m}" for m in plain_ids]
+        if profiles:
+            self.runtime.add_to_role_policy(
+                iam.PolicyStatement(sid="InvokeAgentModel", actions=invoke, resources=profiles)
             )
-        )
+            self.runtime.add_to_role_policy(
+                iam.PolicyStatement(
+                    sid="InvokeAgentModelThroughProfile",
+                    actions=invoke,
+                    resources=routed,
+                    conditions={"StringEquals": {"bedrock:InferenceProfileArn": profiles}},
+                )
+            )
+        if direct:
+            self.runtime.add_to_role_policy(
+                iam.PolicyStatement(
+                    sid="InvokeAgentFoundationModel", actions=invoke, resources=direct
+                )
+            )
 
         log_base = rf"Resource::arn:<AWS::Partition>:logs:{REGION}:{ACCT}:log-group:"
-        suppress(
-            self.runtime.role,
-            [
+        findings = [
+            (
+                "AwsSolutions-IAM5",
+                "The L2 Runtime's own observability grants: its log groups under "
+                "/aws/bedrock-agentcore/runtimes/, DescribeLogGroups (needs log-group:*), "
+                "X-Ray (no resource-level permissions) and PutMetricData (conditioned on "
+                "the bedrock-agentcore namespace), and its workload identity directory.",
+                [
+                    "Resource::*",
+                    regex(log_base + r"\*"),
+                    regex(log_base + r"/aws/bedrock-agentcore/runtimes/\*"),
+                    regex(log_base + r"/aws/bedrock-agentcore/runtimes/\*:log-stream:\*"),
+                    regex(
+                        rf"Resource::arn:<AWS::Partition>:bedrock-agentcore:{REGION}:{ACCT}:"
+                        r"workload-identity-directory/default/workload-identity/\*"
+                    ),
+                ],
+            ),
+            (
+                "AwsSolutions-IAM5",
+                "AgentRuntimeArtifact.from_code_asset grants the Runtime read on its own "
+                "code asset in the CDK bootstrap assets bucket (s3:GetObject*, "
+                "s3:GetBucket*, s3:List*); the bucket is the bootstrap bucket only. The "
+                "Action:: entries would also cover the same wildcards on a later statement "
+                "of this role, so test_synth pins this role to exactly one S3 statement, "
+                "on the bootstrap bucket.",
+                [
+                    "Action::s3:GetObject*",
+                    "Action::s3:GetBucket*",
+                    "Action::s3:List*",
+                    regex(
+                        r"Resource::arn:<AWS::Partition>:s3:::cdk-[a-z0-9]+-assets-"
+                        rf"{ACCT}-{REGION}/\*"
+                    ),
+                ],
+            ),
+        ]
+        if routed:  # an empty appliesTo list would suppress the whole rule
+            findings.append(
                 (
                     "AwsSolutions-IAM5",
-                    "The L2 Runtime's own observability grants: its log groups under "
-                    "/aws/bedrock-agentcore/runtimes/, DescribeLogGroups (needs log-group:*), "
-                    "X-Ray (no resource-level permissions) and PutMetricData (conditioned on "
-                    "the bedrock-agentcore namespace), and its workload identity directory.",
-                    [
-                        "Resource::*",
-                        regex(log_base + r"\*"),
-                        regex(log_base + r"/aws/bedrock-agentcore/runtimes/\*"),
-                        regex(log_base + r"/aws/bedrock-agentcore/runtimes/\*:log-stream:\*"),
-                        regex(
-                            rf"Resource::arn:<AWS::Partition>:bedrock-agentcore:{REGION}:{ACCT}:"
-                            r"workload-identity-directory/default/workload-identity/\*"
-                        ),
-                    ],
-                ),
-                (
-                    "AwsSolutions-IAM5",
-                    "AgentRuntimeArtifact.from_code_asset grants the Runtime read on its own "
-                    "code asset in the CDK bootstrap assets bucket (s3:GetObject*, "
-                    "s3:GetBucket*, s3:List*); the bucket is the bootstrap bucket only. The "
-                    "Action:: entries would also cover the same wildcards on a later statement "
-                    "of this role, so test_synth pins this role to exactly one S3 statement, "
-                    "on the bootstrap bucket.",
-                    [
-                        "Action::s3:GetObject*",
-                        "Action::s3:GetBucket*",
-                        "Action::s3:List*",
-                        regex(
-                            r"Resource::arn:<AWS::Partition>:s3:::cdk-[a-z0-9]+-assets-"
-                            rf"{ACCT}-{REGION}/\*"
-                        ),
-                    ],
-                ),
-                (
-                    "AwsSolutions-IAM5",
-                    "Foundation-model ARNs behind the two AU inference profiles; the trailing * "
-                    "covers a dated or versioned model ID behind each profile.",
-                    [f"Resource::{m}" for m in models if m.endswith("*")],
-                ),
-            ],
-        )
+                    "Foundation-model ARNs behind the agent's inference profiles, in any "
+                    "Region (the profile picks the destination) and with a trailing * for a "
+                    "dated or versioned model ID; the statement's bedrock:InferenceProfileArn "
+                    "condition allows them only through the role's own profiles.",
+                    [f"Resource::{m}" for m in routed],
+                )
+            )
+        suppress(self.runtime.role, findings)

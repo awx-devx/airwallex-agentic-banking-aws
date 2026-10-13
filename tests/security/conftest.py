@@ -21,12 +21,13 @@ for path in (str(ROOT), str(FIXTURES)):
 @pytest.fixture(scope="session")
 def synthed():
     import aws_cdk as cdk
+    from awx_common.regions import DEFAULT_REGION
     from infra.app import build_app
     from infra.constructs.kit_workflow import KitWorkflow
 
-    app = cdk.App(context={"account": "111122223333", "region": "ap-southeast-2"})
+    app = cdk.App(context={"account": "111122223333", "region": DEFAULT_REGION})
     toy = cdk.Stack(
-        app, "AwxToyKit", env=cdk.Environment(account="111122223333", region="ap-southeast-2")
+        app, "AwxToyKit", env=cdk.Environment(account="111122223333", region=DEFAULT_REGION)
     )
     build_app(app, kits=())  # spine + agent stacks and cdk-nag; the toy kit stands in for kits
     spine = app.node.find_child("AwxSpine")

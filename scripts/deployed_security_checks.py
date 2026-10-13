@@ -5,7 +5,9 @@ written the stack outputs to infra/cdk-outputs.json:
     AWS_PROFILE=awx-deploy uv run --all-packages python scripts/deployed_security_checks.py
     ... scripts/deployed_security_checks.py --outputs path/to/cdk-outputs.json
 
-Prints one PASS/FAIL line per check and no secret, token or password.
+The checks run in the Region the stacks were deployed to (the AwxRegion output of
+AwxAgentStack), falling back to awx_common.regions.DEFAULT_REGION for an outputs file without
+it. Prints one PASS/FAIL line per check and no secret, token or password.
 
 Signs in as the demo users `demo-platform-requester`, `demo-k6-operator` and
 `demo-k5-operator-approver` (docs/deployment.md, "Demo users").
@@ -21,10 +23,12 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 import boto3
+from awx_common.regions import DEFAULT_REGION
 
-REGION = "ap-southeast-2"
+REGION = ""  # the deployment's Region: AwxAgentStack.AwxRegion in the outputs file
 # The file `cdk deploy --outputs-file cdk-outputs.json` writes when run from infra/.
 DEFAULT_OUTPUTS = Path(__file__).resolve().parents[1] / "infra" / "cdk-outputs.json"
 OUT: dict = {}
@@ -47,19 +51,34 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def load_outputs(path: Path) -> None:
     """Read the deployed stack outputs the checks need."""
-    global OUT, GW, CLIENT, SECRET_ARN
+    global OUT, GW, CLIENT, SECRET_ARN, REGION
     OUT = json.loads(path.read_text())
     GW = OUT["AwxAgentStack"]["AwxGatewayUrl"]
     CLIENT = OUT["AwxAgentStack"]["AwxUserPoolClientId"]
     SECRET_ARN = OUT["AwxSpine"]["AirwallexSecretArn"]
+    REGION = OUT["AwxAgentStack"].get("AwxRegion") or DEFAULT_REGION
+    make_clients(REGION)
 
 
-sm = boto3.client("secretsmanager", region_name=REGION)
-idp = boto3.client("cognito-idp", region_name=REGION)
-lam = boto3.client("lambda", region_name=REGION)
-iam = boto3.client("iam")
-cfn = boto3.client("cloudformation", region_name=REGION)
-logs = boto3.client("logs", region_name=REGION)
+# The AWS clients, made by make_clients once the Region is known from the outputs file.
+sm: Any = None
+idp: Any = None
+lam: Any = None
+iam: Any = None
+cfn: Any = None
+logs: Any = None
+
+
+def make_clients(region: str) -> None:
+    """Create the AWS clients in the deployment's Region."""
+    global sm, idp, lam, iam, cfn, logs
+    sm = boto3.client("secretsmanager", region_name=region)
+    idp = boto3.client("cognito-idp", region_name=region)
+    lam = boto3.client("lambda", region_name=region)
+    iam = boto3.client("iam")
+    cfn = boto3.client("cloudformation", region_name=region)
+    logs = boto3.client("logs", region_name=region)
+
 
 results: list[tuple[str, bool, str]] = []
 

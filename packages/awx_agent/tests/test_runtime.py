@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 from awx_agent.runtime import app as rt
+from awx_common.regions import DEFAULT_REGION
 
-ENV = {"AWX_GATEWAY_URL": "https://gw.example/mcp", "AWX_REGION": "ap-southeast-2"}
+ENV = {"AWX_GATEWAY_URL": "https://gw.example/mcp", "AWX_REGION": DEFAULT_REGION}
 
 
 def _token(sub="user-1"):

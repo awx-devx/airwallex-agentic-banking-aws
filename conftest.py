@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import os
 
+from awx_common.regions import DEFAULT_REGION
+
 TEST_ACCOUNT = "111122223333"
-TEST_REGION = "ap-southeast-2"
+TEST_REGION = DEFAULT_REGION
 TEST_ALERT_EMAIL = "alerts@example.com"
 
 os.environ.setdefault("CDK_DEFAULT_ACCOUNT", TEST_ACCOUNT)

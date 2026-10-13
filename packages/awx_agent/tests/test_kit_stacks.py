@@ -351,7 +351,9 @@ def test_spine_reader_adapter_and_approval_roles_hold_exactly_their_pairs_in_the
             imported_role="approval_role_name",
         )
         approval |= pairs(stmts, symbols[name], star_ok=("states:sendtasksuccess",))
-    region, account = "ap-southeast-2", "111122223333"
+    from awx_common.regions import DEFAULT_REGION
+
+    region, account = DEFAULT_REGION, "111122223333"
     expected_approval = {
         ("dynamodb:putitem", "{decisions}", NONE),
         ("dynamodb:query", "{decisions}", NONE),

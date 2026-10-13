@@ -360,6 +360,7 @@ def test_child_machines_are_named_and_timeouts_keyed_per_machine(monkeypatch):
     root = __import__("pathlib").Path(__file__).resolve().parents[3]
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
+    from awx_common.regions import DEFAULT_REGION
     from infra.app import build_app
     from infra.constructs.kit_workflow import KitWorkflow, run_timeout
     from infra.kit_manifest import parse_workflow
@@ -368,10 +369,10 @@ def test_child_machines_are_named_and_timeouts_keyed_per_machine(monkeypatch):
     module = types.ModuleType(MODULE)
     module.SPECS = {"pay_many": spec}
     monkeypatch.setitem(sys.modules, MODULE, module)
-    app = cdk.App(context={"account": "111122223333", "region": "ap-southeast-2"})
+    app = cdk.App(context={"account": "111122223333", "region": DEFAULT_REGION})
     build_app(app)
     stack = cdk.Stack(
-        app, "ChildNames", env=cdk.Environment(account="111122223333", region="ap-southeast-2")
+        app, "ChildNames", env=cdk.Environment(account="111122223333", region=DEFAULT_REGION)
     )
     m = parse_workflow(spec)
     wf = KitWorkflow(

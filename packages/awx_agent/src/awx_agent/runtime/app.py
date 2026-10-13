@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from awx_common.kits import KITS
+from awx_common.regions import DEFAULT_REGION, UnsupportedRegionError, default_model_ids
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
 from ..identity import jwt_claims_unverified
@@ -28,9 +29,8 @@ from .prompt import system_prompt
 
 log = logging.getLogger(__name__)
 
-DEFAULT_MODEL_ID = "au.anthropic.claude-sonnet-5"
-DEFAULT_FALLBACK_MODEL_ID = "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
-DEFAULT_REGION = "ap-southeast-2"
+# Local fallbacks only: the deployed Runtime always gets AWX_REGION and the model IDs.
+DEFAULT_MODEL_ID, DEFAULT_FALLBACK_MODEL_ID = default_model_ids(DEFAULT_REGION)
 _FALLBACK_CODES = frozenset(
     {"AccessDeniedException", "ValidationException", "ResourceNotFoundException"}
 )
@@ -38,6 +38,14 @@ _MAX_SESSIONS = 64
 _MAX_PROMPT_CHARS = 16_000
 
 app = BedrockAgentCoreApp()
+
+
+def _local_model_ids(region: str) -> tuple[str, str]:
+    """The Region's default inference profiles, or the default Region's for a Region with none."""
+    try:
+        return default_model_ids(region)
+    except UnsupportedRegionError:
+        return DEFAULT_MODEL_ID, DEFAULT_FALLBACK_MODEL_ID
 
 
 class InvocationError(ValueError):
@@ -181,8 +189,9 @@ def run_turn(
 ) -> dict[str, Any]:
     gateway_url = env["AWX_GATEWAY_URL"]
     region = env.get("AWX_REGION", DEFAULT_REGION)
-    models = [env.get("AWX_MODEL_ID", DEFAULT_MODEL_ID)]
-    fallback = env.get("AWX_FALLBACK_MODEL_ID", DEFAULT_FALLBACK_MODEL_ID)
+    default_primary, default_fallback = _local_model_ids(region)
+    models = [env.get("AWX_MODEL_ID", default_primary)]
+    fallback = env.get("AWX_FALLBACK_MODEL_ID", default_fallback)
     if fallback and fallback not in models:
         models.append(fallback)
     # The caller's sub is part of the key so one user's history never serves another user.

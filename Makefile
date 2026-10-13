@@ -3,8 +3,14 @@
 
 UV ?= uv
 CDK ?= npx -y aws-cdk@2.1144.0
-# Context for synth and deploy: ACCOUNT and ALERT_EMAIL are required, KITS (k1,k4) is optional.
-CDK_CONTEXT = -c account=$(ACCOUNT) -c alert_email=$(ALERT_EMAIL) $(if $(KITS),-c kits=$(KITS))
+# The AWS Region to bootstrap, synthesise and deploy. Keep in step with DEFAULT_REGION in
+# packages/awx_common/src/awx_common/regions.py (a test pins them together).
+REGION ?= us-west-2
+# Context for synth and deploy: ACCOUNT and ALERT_EMAIL are required; KITS (k1,k4), MODEL_ID and
+# FALLBACK_MODEL_ID are optional (the model IDs default to REGION's inference profiles).
+CDK_CONTEXT = -c account=$(ACCOUNT) -c alert_email=$(ALERT_EMAIL) -c region=$(REGION) \
+	$(if $(KITS),-c kits=$(KITS)) $(if $(MODEL_ID),-c model_id=$(MODEL_ID)) \
+	$(if $(FALLBACK_MODEL_ID),-c fallback_model_id=$(FALLBACK_MODEL_ID))
 # Extra CDK CLI arguments for synth and deploy, for example CDK_ARGS="--require-approval never"
 # in a shell with no terminal, where cdk deploy cannot ask a person to approve IAM changes.
 CDK_ARGS ?=
@@ -39,13 +45,13 @@ check: sync lint secret-scan test ## sync, lint, secret scan and offline tests
 
 # Runs from the repository root, which has no cdk.json, so the CDK CLI does not load the app
 # (the app needs ALERT_EMAIL; bootstrapping does not).
-bootstrap: require-account ## Bootstrap CDK once per account: make bootstrap ACCOUNT=<12-digit id>
-	$(CDK) bootstrap aws://$(ACCOUNT)/ap-southeast-2
+bootstrap: require-account ## Bootstrap CDK once per account and Region: make bootstrap ACCOUNT=<12-digit id> [REGION=...]
+	$(CDK) bootstrap aws://$(ACCOUNT)/$(REGION)
 
-synth: require-target ## Synthesise every stack: make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [KITS=k1,k4] [CDK_ARGS=...]
+synth: require-target ## Synthesise every stack: make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [REGION=...] [KITS=k1,k4] [MODEL_ID=...] [FALLBACK_MODEL_ID=...] [CDK_ARGS=...]
 	cd infra && $(CDK) synth --all $(CDK_CONTEXT) $(CDK_ARGS)
 
-deploy: require-target ## Deploy every stack: make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [KITS=k1,k4] [CDK_ARGS=...]
+deploy: require-target ## Deploy every stack: make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [REGION=...] [KITS=k1,k4] [MODEL_ID=...] [FALLBACK_MODEL_ID=...] [CDK_ARGS=...]
 	cd infra && $(CDK) deploy --all --outputs-file cdk-outputs.json $(CDK_CONTEXT) $(CDK_ARGS)
 
 diagrams: ## Regenerate the architecture diagrams [DRAWIO=/path/to/drawio to render PNGs]
