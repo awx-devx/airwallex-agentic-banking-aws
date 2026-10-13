@@ -262,10 +262,12 @@ def main(
     cognito_factory: Callable[[str], Any] = _cognito,
     stdin: Any = None,
     stdout: Any = None,
+    stderr: Any = None,
 ) -> int:
     env = os.environ if env is None else env
     stdin = stdin or sys.stdin
     out = stdout or sys.stdout
+    err = stderr or sys.stderr
     args = build_parser().parse_args(argv)
     try:
         _validate(args)
@@ -299,6 +301,8 @@ def main(
                 if "error" in reply:
                     raise CliError(f"{reply['error'].get('code')}: {reply['error'].get('message')}")
                 print(reply.get("reply", ""), file=out)
+                # The model that answered goes to stderr, so stdout carries the reply alone.
+                print(f"(answered by {reply.get('model') or 'an unknown model'})", file=err)
             return 0
         if args.command == "proposals":
             if args.proposals_command == "list":

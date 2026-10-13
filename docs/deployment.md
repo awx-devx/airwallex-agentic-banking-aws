@@ -407,7 +407,8 @@ action.
 `awxpoc` (package `awx_agent`) talks to the AgentCore Runtime and the approval API. It reads
 its configuration from the stack outputs file (`--config`, or the `AWXPOC_CONFIG` environment
 variable) and keeps its tokens under `~/.awxpoc`. `awxpoc chat` with no `-m` runs a prompt
-loop.
+loop. After each reply it prints the model that answered to stderr, as
+`(answered by <model ID>)`, so stdout carries only the reply.
 
 ```
 export AWXPOC_CONFIG=infra/cdk-outputs.json
