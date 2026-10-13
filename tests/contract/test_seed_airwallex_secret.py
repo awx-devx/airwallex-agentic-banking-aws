@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 import pytest
+from botocore.exceptions import ClientError
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "seed_airwallex_secret.py"
@@ -44,12 +45,22 @@ class _Client:
         assert self._name == "secretsmanager"
         self._session.calls.append(("put_secret_value", kwargs))
         if self._session.fail:
-            raise RuntimeError(f"AccessDenied for {kwargs['SecretString']}")
+            raise self._session.fail(kwargs["SecretString"])
         return {"VersionId": "v-1"}
 
     def describe_stacks(self, **kwargs):
         assert self._name == "cloudformation"
         self._session.calls.append(("describe_stacks", kwargs))
+        if self._session.no_stack:
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ValidationError",
+                        "Message": "Stack with id AwxSpine does not exist",
+                    }
+                },
+                "DescribeStacks",
+            )
         outputs = [{"OutputKey": "AirwallexSecretArn", "OutputValue": self._session.stack_arn}]
         return {"Stacks": [{"Outputs": outputs if self._session.stack_arn else []}]}
 
@@ -57,8 +68,9 @@ class _Client:
 class _Session:
     """Stands in for boto3.Session and records every call."""
 
-    def __init__(self, stack_arn=ARN, fail=False):
+    def __init__(self, stack_arn=ARN, fail=None, no_stack=False):
         self.calls, self.made, self.stack_arn, self.fail = [], [], stack_arn, fail
+        self.no_stack = no_stack
 
     def __call__(self, **kwargs):
         self.made.append(kwargs)
@@ -138,15 +150,52 @@ def test_ctrl_c_or_end_of_file_uploads_nothing_and_prints_no_traceback(tmp_path,
     assert CID not in out + err
 
 
-def test_an_aws_error_is_one_line_with_no_value_in_it(tmp_path, capsys):
-    session = _Session(fail=True)
-    code, _ = _run(["--outputs", str(_outputs(tmp_path))], session=session)
+def _echo_runtime_error(secret_string):
+    return RuntimeError(f"AccessDenied for {secret_string}")
+
+
+def _echo_client_error(secret_string):
+    return ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": f"denied {secret_string}"}},
+        "PutSecretValue",
+    )
+
+
+@pytest.mark.parametrize(
+    ("cid", "key"),
+    [
+        (CID, KEY),
+        # The shorter value inside the longer one.
+        ("abc", "XYZabcQRS"),
+        # Values that JSON or repr escape when an error echoes them.
+        ('cid"q', "key\\back"),
+        ("cid-plain", "k\u00e9y-zz"),
+        ("c", "k"),
+    ],
+    ids=["plain", "overlap", "json-escaped", "non-ascii", "one-character"],
+)
+@pytest.mark.parametrize(
+    ("fail", "shown"),
+    [
+        (_echo_runtime_error, "RuntimeError"),
+        (_echo_client_error, "ClientError (AccessDeniedException)"),
+    ],
+    ids=["runtime-error", "client-error"],
+)
+def test_an_aws_error_is_one_line_with_no_value_in_it(tmp_path, capsys, cid, key, fail, shown):
+    session = _Session(fail=fail)
+    code, _ = _run(["--outputs", str(_outputs(tmp_path))], answers=(cid, key), session=session)
     assert code == 1
     out, err = capsys.readouterr()
-    assert len(err.strip().splitlines()) == 1
-    assert "AccessDenied" in err
-    assert CID not in out + err
-    assert KEY not in out + err
+    assert err.strip() == f"seed_airwallex_secret: {shown}"
+    assert out == ""
+
+
+def test_ctrl_c_during_the_upload_says_it_may_have_completed(tmp_path, capsys):
+    session = _Session(fail=lambda _: KeyboardInterrupt())
+    code, _ = _run(["--outputs", str(_outputs(tmp_path))], session=session)
+    assert code == 130
+    assert capsys.readouterr().err.strip() == "cancelled; the upload may have completed"
 
 
 def test_the_region_flag_wins_over_the_outputs_file(tmp_path):
@@ -175,13 +224,86 @@ def test_with_no_region_anywhere_the_script_refuses(tmp_path, capsys, region_fla
     assert "no Region: pass --region" in capsys.readouterr().err
 
 
-def test_an_outputs_file_from_another_region_is_refused(tmp_path, capsys):
-    code, session = _run(
-        ["--region", "ap-southeast-2", "--outputs", str(_outputs(tmp_path, region="us-west-2"))]
-    )
+def test_an_outputs_file_from_another_region_falls_back_to_the_stack(tmp_path, capsys):
+    other = "arn:aws:secretsmanager:ap-southeast-2:111122223333:secret:awx-poc/airwallex-X"
+    session = _Session(stack_arn=other)
+    outputs = _outputs(tmp_path, region="us-west-2")
+    code, _ = _run(["--region", "ap-southeast-2", "--outputs", str(outputs)], session=session)
+    assert code == 0
+    assert session.made[0]["region_name"] == "ap-southeast-2"
+    assert ("describe_stacks", {"StackName": "AwxSpine"}) in session.calls
+    assert [put["SecretId"] for put in _puts(session)] == [other]
+    err = capsys.readouterr().err
+    assert f"{outputs} belongs to a deployment in us-west-2" in err
+    assert "looking up the AwxSpine stack in ap-southeast-2" in err
+
+
+def test_with_no_spine_stack_in_the_region_the_script_refuses(tmp_path, capsys):
+    session = _Session(no_stack=True)
+    outputs = _outputs(tmp_path, region="us-west-2")
+    code, _ = _run(["--region", "ap-southeast-2", "--outputs", str(outputs)], session=session)
     assert code == 2
     assert _puts(session) == []
-    assert "a deployment in us-west-2, not ap-southeast-2" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no AwxSpine stack in ap-southeast-2: pass --region with the Region" in err
+    assert "or seed after the spine stack has deployed" in err
+    assert "Traceback" not in err
+
+
+def test_a_spine_stack_with_no_secret_output_is_refused(tmp_path, capsys):
+    session = _Session(stack_arn="")
+    outputs = _outputs(tmp_path, region="us-west-2", arn=None)
+    code, _ = _run(["--outputs", str(outputs)], session=session)
+    assert code == 2
+    assert _puts(session) == []
+    err = capsys.readouterr().err
+    assert "stack AwxSpine in us-west-2 has no AirwallexSecretArn output; wait for" in err
+    assert "--secret-id <ARN>" in err
+
+
+def test_an_outputs_arn_with_no_region_is_refused(tmp_path, capsys):
+    outputs = _outputs(tmp_path, region="us-west-2", arn="awx-poc/airwallex")
+    code, session = _run(["--outputs", str(outputs)])
+    assert code == 2
+    assert _puts(session) == []
+    err = capsys.readouterr().err
+    assert "holds a secret ARN with no Region in it; pass --secret-id <ARN>" in err
+    assert "--region" not in err
+
+
+@pytest.mark.parametrize(
+    ("secret_id", "message"),
+    [
+        (
+            "arn:aws:secretsmanager:ap-southeast-2:111122223333:secret:awx-poc/airwallex",
+            "--secret-id names the secret of a deployment in ap-southeast-2, not us-west-2; "
+            "pass --region ap-southeast-2 to seed that deployment, or --secret-id <ARN> to "
+            "seed the us-west-2 one",
+        ),
+        ("arn:aws:secretsmanager", "--secret-id holds a secret ARN with no Region in it"),
+    ],
+    ids=["other-region", "no-region"],
+)
+def test_a_secret_id_arn_outside_the_region_is_refused(tmp_path, capsys, secret_id, message):
+    code, session = _run(["--secret-id", secret_id, "--outputs", str(_outputs(tmp_path))])
+    assert code == 2
+    assert _puts(session) == []
+    assert message in capsys.readouterr().err
+
+
+def test_a_secret_id_arn_in_the_region_is_seeded(tmp_path):
+    code, session = _run(["--secret-id", ARN, "--outputs", str(_outputs(tmp_path))])
+    assert code == 0
+    assert [put["SecretId"] for put in _puts(session)] == [ARN]
+
+
+def test_an_outputs_file_that_is_not_json_names_a_next_step(tmp_path, capsys):
+    path = tmp_path / "cdk-outputs.json"
+    path.write_text("{")
+    code, session = _run(["--outputs", str(path)])
+    assert code == 2
+    assert session.made == []
+    assert "fix or delete it, or pass --outputs with another file" in capsys.readouterr().err
 
 
 def test_the_secret_id_flag_names_the_secret(tmp_path):
@@ -203,6 +325,7 @@ def test_from_env_reads_the_environment_and_prompts_for_nothing(tmp_path, capsys
     )
     assert code == 0
     assert _puts(session)[0]["SecretString"] == json.dumps({"client_id": CID, "api_key": KEY})
+    assert environ == {}
     out, err = capsys.readouterr()
     assert CID not in out + err
 
@@ -224,7 +347,10 @@ def test_with_no_terminal_and_no_from_env_the_script_refuses(tmp_path, capsys):
     code, session = _run(["--outputs", str(_outputs(tmp_path))], answers=(), terminal=False)
     assert code == 2
     assert _puts(session) == []
-    assert "pass --from-env" in capsys.readouterr().err
+    assert (
+        "no terminal to prompt on; set AWX_CLIENT_ID and AWX_API_KEY and pass --from-env"
+        in capsys.readouterr().err
+    )
 
 
 def test_the_script_writes_no_file(tmp_path, monkeypatch):

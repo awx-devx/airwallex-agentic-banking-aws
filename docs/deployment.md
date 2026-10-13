@@ -123,9 +123,11 @@ The script prompts for the client ID and the API key without echoing them, and r
 empty value. It calls Secrets Manager `PutSecretValue` with a JSON object holding `client_id`
 and `api_key`, so no value is written to a file, put on a command line or printed. Ctrl-C at a
 prompt uploads nothing. The script finds the secret's Amazon Resource Name (ARN) in
-`infra/cdk-outputs.json`, which `make deploy` writes once the whole deploy has finished. Before
-then, it reads the ARN from the spine stack's outputs in that Region, so you can seed the secret
-while the later stacks still deploy. `--secret-id <ARN>` names the secret directly.
+`infra/cdk-outputs.json` when that ARN is in the Region that `--region` names. `make deploy`
+writes the file once the whole deploy has finished. Before then, or when the file belongs to a
+deployment in another Region, the script reads the ARN from the spine stack's outputs in the
+Region that `--region` names, so you can seed the secret while the later stacks still deploy.
+`--secret-id <ARN>` names the secret directly.
 
 The prompts need a terminal. In a shell with no terminal, put `AWX_CLIENT_ID` and `AWX_API_KEY`
 in the environment, for example from your CI system's secret store, and pass `--from-env`:

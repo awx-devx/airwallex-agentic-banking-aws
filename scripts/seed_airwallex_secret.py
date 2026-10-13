@@ -12,7 +12,8 @@ command line or printed.
 
 The Region is --region, else AwxAgentStack.AwxRegion in infra/cdk-outputs.json, else the
 script refuses. The secret is --secret-id, else AwxSpine.AirwallexSecretArn in the outputs
-file, else the AirwallexSecretArn output of the AwxSpine stack in that Region.
+file when that Amazon Resource Name (ARN) is in the Region, else the AirwallexSecretArn output
+of the AwxSpine stack in the Region. An ARN in another Region is never seeded.
 """
 
 from __future__ import annotations
@@ -22,11 +23,12 @@ import getpass
 import json
 import os
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from pathlib import Path
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
 
 # The file `cdk deploy --outputs-file cdk-outputs.json` writes when run from infra/.
 DEFAULT_OUTPUTS = Path(__file__).resolve().parents[1] / "infra" / "cdk-outputs.json"
@@ -56,7 +58,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--secret-id",
-        help="the secret's ARN or name (default: AwxSpine.AirwallexSecretArn)",
+        help="the secret's Amazon Resource Name (ARN) or name (default: "
+        "AwxSpine.AirwallexSecretArn in the outputs file, else the AwxSpine stack's output)",
     )
     parser.add_argument(
         "--from-env",
@@ -74,7 +77,10 @@ def read_outputs(path: Path) -> dict[str, Any]:
     try:
         outputs = json.loads(path.read_text())
     except ValueError as exc:
-        raise SeedError(f"{path}: not valid JSON ({exc.msg})") from None
+        raise SeedError(
+            f"{path}: not valid JSON ({exc.msg}); fix or delete it, or pass --outputs with "
+            "another file"
+        ) from None
     if not isinstance(outputs, dict):
         raise SeedError(f"{path}: not a JSON object")
     return outputs
@@ -104,6 +110,22 @@ def _arn_region(arn: str) -> str:
     return parts[3] if len(parts) > 3 and parts[0] == "arn" else ""
 
 
+def _check_arn_region(arn: str, region: str, source: str) -> None:
+    """Refuse an ARN in another Region, or an ARN with no Region in it."""
+    recorded = _arn_region(arn)
+    if not recorded:
+        raise SeedError(
+            f"{source} holds a secret ARN with no Region in it; pass --secret-id <ARN> for the "
+            f"secret in {region}"
+        )
+    if recorded != region:
+        raise SeedError(
+            f"{source} names the secret of a deployment in {recorded}, not {region}; pass "
+            f"--region {recorded} to seed that deployment, or --secret-id <ARN> to seed the "
+            f"{region} one"
+        )
+
+
 def resolve_secret_id(
     secret_id: str | None,
     outputs: Mapping[str, Any],
@@ -111,25 +133,42 @@ def resolve_secret_id(
     session: Any,
     path: Path,
 ) -> str:
-    """--secret-id, else the outputs file's ARN, else the spine stack's output in `region`."""
+    """--secret-id, else the outputs file's ARN in `region`, else the spine stack's output."""
     if secret_id and secret_id.strip():
-        return secret_id.strip()
+        secret_id = secret_id.strip()
+        if secret_id.startswith("arn:"):
+            _check_arn_region(secret_id, region, "--secret-id")
+        return secret_id
     arn = _output(outputs, SPINE_STACK, ARN_OUTPUT)
     if arn:
         recorded = _arn_region(arn)
-        if recorded != region:
-            raise SeedError(
-                f"{path} holds the secret of a deployment in {recorded or 'an unknown Region'}, "
-                f"not {region}; pass --region {recorded} for that deployment, or --secret-id"
-            )
-        return arn
+        if recorded == region:
+            return arn
+        if not recorded:
+            _check_arn_region(arn, region, str(path))
+        print(
+            f"seed_airwallex_secret: {path} belongs to a deployment in {recorded}; looking up "
+            f"the {SPINE_STACK} stack in {region}",
+            file=sys.stderr,
+        )
     # The outputs file is written once the whole deploy has finished; the spine stack's
     # outputs exist as soon as it has deployed.
-    stacks = session.client("cloudformation").describe_stacks(StackName=SPINE_STACK)["Stacks"]
-    for output in stacks[0].get("Outputs", []) if stacks else []:
+    try:
+        stacks = session.client("cloudformation").describe_stacks(StackName=SPINE_STACK)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") != "ValidationError":
+            raise
+        raise SeedError(
+            f"no {SPINE_STACK} stack in {region}: pass --region with the Region the stacks were "
+            "deployed to, or seed after the spine stack has deployed"
+        ) from None
+    for output in stacks["Stacks"][0].get("Outputs", []) if stacks["Stacks"] else []:
         if output.get("OutputKey") == ARN_OUTPUT and output.get("OutputValue"):
             return str(output["OutputValue"])
-    raise SeedError(f"stack {SPINE_STACK} in {region} has no {ARN_OUTPUT} output")
+    raise SeedError(
+        f"stack {SPINE_STACK} in {region} has no {ARN_OUTPUT} output; wait for the spine stack "
+        "to finish deploying, or pass --secret-id <ARN>"
+    )
 
 
 def _has_terminal() -> bool:
@@ -143,7 +182,7 @@ def _has_terminal() -> bool:
 
 def read_credentials(
     from_env: bool,
-    environ: Mapping[str, str],
+    environ: Mapping[str, str] | MutableMapping[str, str],
     prompt: Callable[[str], str],
     has_terminal: Callable[[], bool],
 ) -> dict[str, str]:
@@ -154,9 +193,16 @@ def read_credentials(
             "api_key": environ.get(API_KEY_VAR, ""),
         }
         names = {"client_id": CLIENT_ID_VAR, "api_key": API_KEY_VAR}
+        # Keep the values out of the environment any credential process inherits.
+        if isinstance(environ, MutableMapping):
+            environ.pop(CLIENT_ID_VAR, None)
+            environ.pop(API_KEY_VAR, None)
     else:
         if not has_terminal():
-            raise SeedError("no terminal to prompt on; pass --from-env in a shell with no terminal")
+            raise SeedError(
+                f"no terminal to prompt on; set {CLIENT_ID_VAR} and {API_KEY_VAR} and pass "
+                "--from-env"
+            )
         values = {
             "client_id": prompt("Airwallex client ID: "),
             "api_key": prompt("Airwallex API key: "),
@@ -178,7 +224,7 @@ def main(
     session_factory: Callable[..., Any] = boto3.Session,
 ) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    values: dict[str, str] = {}
+    uploading = False
     try:
         outputs = read_outputs(args.outputs)
         region = resolve_region(args.region, outputs, args.outputs)
@@ -187,20 +233,25 @@ def main(
         values = read_credentials(
             args.from_env, os.environ if environ is None else environ, prompt, has_terminal
         )
+        uploading = True
         result = session.client("secretsmanager").put_secret_value(
             SecretId=secret_id, SecretString=json.dumps(values)
         )
     except (KeyboardInterrupt, EOFError):
-        print("\ncancelled; nothing was uploaded", file=sys.stderr)
+        if uploading:
+            print("\ncancelled; the upload may have completed", file=sys.stderr)
+        else:
+            print("\ncancelled; nothing was uploaded", file=sys.stderr)
         return 130
     except SeedError as exc:
         print(f"seed_airwallex_secret: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:
-        # An AWS error names the secret and the operation. Any value it held is masked anyway.
-        message = f"{type(exc).__name__}: {exc}"
-        for value in values.values():
-            message = message.replace(value, "***")
+        # Print the exception type and any AWS error code, never the message, which can echo
+        # the request.
+        message = type(exc).__name__
+        if isinstance(exc, ClientError):
+            message += f" ({exc.response.get('Error', {}).get('Code', 'no error code')})"
         print(f"seed_airwallex_secret: {message}", file=sys.stderr)
         return 1
     print(f"seeded {secret_id} in {region} (version {result.get('VersionId', 'unknown')})")
