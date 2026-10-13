@@ -241,7 +241,7 @@ def test_spec_agent_min_tier_auto_keeps_auto(monkeypatch):
     assert out["status_message"] == (
         "The run has started without approval. The workflow rechecks policy before its first "
         "step and may still stop it. This result does not say whether money has moved. "
-        "No tool returns a proposal's status. To see it later, run "
+        "No read tool returns a proposal's current status. To see it later, run "
         f"`awxpoc proposals show {out['proposal_id']}`."
     )
 
@@ -272,7 +272,7 @@ def test_status_message_says_what_each_status_means():
     assert waiting["status"] == "AWAITING_APPROVAL"
     assert waiting["status_message"] == (
         "Nothing has run yet. The proposal waits for approval by someone other than the "
-        "proposer. No tool returns a proposal's status. To see it later, run "
+        "proposer. No read tool returns a proposal's current status. To see it later, run "
         f"`awxpoc proposals show {waiting['proposal_id']}`."
     )
     # A blocked proposal never runs, so its message has no status pointer.
@@ -393,9 +393,10 @@ def test_retry_reports_the_existing_executions_real_state(execution_status, outc
     assert retry["status_message"].startswith("This proposal already exists")
     assert "Nothing has run yet" not in retry["status_message"]
     assert len(sfn.executions) == 1
-    # A proposal that can still run points to the CLI; a finished one has nothing to show later.
+    # A proposal that can still run points to `awxpoc proposals show`; a finished one has
+    # nothing to show later.
     pointer = (
-        "No tool returns a proposal's status. To see it later, run "
+        "No read tool returns a proposal's current status. To see it later, run "
         f"`awxpoc proposals show {first['proposal_id']}`."
     )
     if state == "IN_PROGRESS":
@@ -424,7 +425,8 @@ def test_an_existing_proposal_message_points_to_the_cli_while_it_can_still_run(
     message = tools_mod._existing_message(state, tier, "p-1", finished=finished)
     assert message.startswith("This proposal already exists")
     expected = (
-        " No tool returns a proposal's status. To see it later, run `awxpoc proposals show p-1`."
+        " No read tool returns a proposal's current status. To see it later, run "
+        "`awxpoc proposals show p-1`."
     )
     assert message.endswith(expected) is pointer
 

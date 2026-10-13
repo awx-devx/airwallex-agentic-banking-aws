@@ -379,8 +379,9 @@ AWAITING_MESSAGE = (
 # The message for a proposal that can still run ends with the command that shows its status
 # later, so the model points the user there and does not offer a read check. No read tool in
 # kits 1 to 8 returns a proposal's status; tests/contract/test_tool_descriptions.py pins that.
+# The sentence names read tools because a propose result itself carries a status.
 STATUS_POINTER = (
-    "No tool returns a proposal's status. To see it later, run "
+    "No read tool returns a proposal's current status. To see it later, run "
     "`awxpoc proposals show {proposal_id}`."
 )
 # Step Functions execution statuses after which the execution does nothing more.

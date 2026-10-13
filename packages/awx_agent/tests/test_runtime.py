@@ -326,12 +326,14 @@ def test_the_prompt_sends_the_user_to_the_cli_for_a_status():
     from awx_agent.runtime.prompt import system_prompt
 
     flat = " ".join(system_prompt("k2").split())
-    assert "No tool returns a proposal's current status, so never offer to check one." in flat
+    assert "No read_* tool returns it, so never offer to check it." in flat
+    # The rule applies when the user asks, so a reply right after a propose is not told to
+    # say it has not checked the status the tool just returned.
+    assert "When the user asks for a proposal's current status, say you have not checked" in flat
     # A propose_* retry is the only tool output carrying a status; it can start a second run.
     assert "Never call a propose_* tool to check a status" in flat
     assert (
-        "Say you have not checked it and give the user `awxpoc proposals show <proposal_id>`."
-        in flat
+        "say you have not checked it and give them `awxpoc proposals show <proposal_id>`." in flat
     )
 
 

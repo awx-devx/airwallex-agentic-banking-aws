@@ -4,11 +4,27 @@ Code sets a proposal's risk tier when the agent proposes, and the tier decides w
 different person must approve it. A live run on 13 Oct 2026 showed Claude Sonnet 5 repeating
 a general approval sentence for an action code runs at the AUTO tier, so every description
 the agent sees (the Gateway ToolDefinition) must leave that to code.
+
+The pattern checks have known limits. No propose description uses these forms today, so they
+are listed here and left out of the patterns:
+- EVENT_CLAUSE misses a present-tense event, such as "once the transfer settles".
+- EVENT_CLAUSE misses "once" followed by "is" and a state, such as "once the payout is paid".
+- EVENT_CLAUSE misses the same clause after "when", "after" or "as soon as".
+- EVENT_CLAUSE flags a noun ending in "-ed" after "once", such as "runs once per seed".
+- PROPOSE_FORBIDDEN and APPROVAL_OUTCOME miss informal approval words, such as "OK it", "a
+  checker", "maker-checker", "a second pair of eyes", "4-eyes" or "dual control".
+- They miss a role that decides, such as "a manager signs it", "the admin decides", "queued
+  for an operator" or "pending a decision".
+- They miss timing words, such as "instantly", "starts now", "runs on its own", "runs
+  unattended" or "without delay".
+- The proposal status read check misses a read that never says "propos", such as "whether the
+  run for a request_ref was approved"; the reads.py check covers that path.
 """
 
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 from awx_agent.registry import load_kit_tools
@@ -138,20 +154,105 @@ def test_no_propose_description_states_a_check_as_an_event(kit, spec, definition
     assert not found, f"{kit} {spec.name}: {found}"
 
 
+# A read description that says it returns a proposal's status, state, outcome or approval.
+PROPOSAL_STATUS_READ = re.compile(
+    r"\bpropos\w*\b[^.]*\b(?:status|state|outcome|approv)", re.IGNORECASE
+)
+# What a kit's reads.py would need to reach a proposal's status.
+PROPOSAL_STORE = re.compile(r"\b(?:ProposalRepo|AWX_PROPOSALS_TABLE|proposal_outcome)\b")
+REPO = Path(__file__).resolve().parents[2]
+
+
+def _property_names(schema):
+    """Every property name in a JSON schema, at any depth."""
+    if isinstance(schema, dict):
+        for key, value in schema.items():
+            if key == "properties" and isinstance(value, dict):
+                yield from value
+            yield from _property_names(value)
+    elif isinstance(schema, list):
+        for value in schema:
+            yield from _property_names(value)
+
+
+def _reads_a_proposal_status(definition):
+    """The schema properties and description texts that point at a proposal's status."""
+    found = [
+        name for name in _property_names(definition["inputSchema"]) if name.startswith("proposal")
+    ]
+    found += [text for _, text in _descriptions(definition) if PROPOSAL_STATUS_READ.search(text)]
+    return found
+
+
 def test_no_read_tool_returns_a_proposal_status():
-    """The status messages and the prompt tell the model that no tool returns a proposal's
-    status. A read tool that takes a proposal_id would make that false: compute the sentence
-    per kit in the handler instead."""
+    """The status messages and the prompt tell the model that no read tool returns a proposal's
+    status. A read tool that reaches the proposals store, or takes or describes a proposal,
+    would make that false: compute the sentence per kit in the handler instead."""
     from awx_agent.handlers.tools import STATUS_POINTER
 
-    assert STATUS_POINTER.startswith("No tool returns a proposal's status.")
+    assert STATUS_POINTER.startswith("No read tool returns a proposal's current status.")
     reads = [d for d in DEFINITIONS if d[1].kind is ToolKind.READ]
     assert reads
     for kit, spec, definition in reads:
-        schema = str(definition["inputSchema"])
-        assert "proposal_id" not in schema, f"{kit} {spec.name}"
-        assert "proposal_id" not in definition["description"], f"{kit} {spec.name}"
-        assert "proposal's status" not in definition["description"], f"{kit} {spec.name}"
+        assert not _reads_a_proposal_status(definition), f"{kit} {spec.name}"
+    # The reads have no path to the proposals table, which is what keeps the claim true.
+    modules = sorted(REPO.glob("kits/*/src/*/reads.py"))
+    assert len(modules) == len(KIT_DIRS)
+    for module in modules:
+        found = PROPOSAL_STORE.findall(module.read_text())
+        assert not found, f"{module.relative_to(REPO)}: {found}"
+
+
+def _read_definition(description, **properties):
+    return {
+        "description": description,
+        "inputSchema": {"type": "object", "properties": properties},
+    }
+
+
+@pytest.mark.parametrize(
+    ("kit", "name"),
+    [("k5", "propose_collect_repayment"), ("k7", "propose_collect_weekly_repayment")],
+)
+def test_a_repayment_description_gives_the_model_no_condition_to_apply(kit, name):
+    """Live runs on 13 Oct 2026 tested these conditions against the read figures ("this looks
+    fundable", "no weeks have closed"). Code enforces them, so the descriptions leave them out."""
+    (definition,) = [d for k, spec, d in DEFINITIONS if (k, spec.name) == (kit, name)]
+    text = definition["description"].removesuffix(PROPOSE_SUFFIX)
+    for condition in ("unless", "at least", "has ended", "in flight"):
+        assert condition not in text, f"{kit} {name}: {condition}"
+
+
+@pytest.mark.parametrize(
+    ("definition", "caught"),
+    [
+        (_read_definition("Read a card.", proposal_id={"type": "string"}), True),
+        (_read_definition("Read a card.", proposal_ref={"type": "string"}), True),
+        (_read_definition("Returns a proposal's status."), True),
+        (_read_definition("Returns the proposal status for a payout."), True),
+        (_read_definition("Read a proposal's state and outcome."), True),
+        (_read_definition("List your recent proposals with their status."), True),
+        (_read_definition("Whether the proposal was approved and has finished."), True),
+        (
+            _read_definition(
+                "Read a payout.", filter={"type": "object", "properties": {"proposal": {}}}
+            ),
+            True,
+        ),
+        (_read_definition("Read a payout's status by employer and pay period."), False),
+        (_read_definition("Read a dispute's state.", dispute_id={"type": "string"}), False),
+        (_read_definition("Read the card a run issued.", purchase_ref={"type": "string"}), False),
+    ],
+)
+def test_the_proposal_status_read_check(definition, caught):
+    assert bool(_reads_a_proposal_status(definition)) is caught
+
+
+def test_the_proposal_store_check():
+    assert PROPOSAL_STORE.search("from awx_common.proposals import ProposalRepo")
+    assert PROPOSAL_STORE.search('os.environ["AWX_PROPOSALS_TABLE"]')
+    assert PROPOSAL_STORE.search("outcome = proposal_outcome(item)")
+    assert not PROPOSAL_STORE.search("def read_dispute(dispute_id): ...")
 
 
 @pytest.mark.parametrize(("kit", "spec", "definition"), PROPOSALS, ids=PROPOSAL_IDS)

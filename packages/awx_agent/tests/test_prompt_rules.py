@@ -8,7 +8,8 @@ of its kit does. They assumed a deposit had landed and rounded amounts. When the
 propose an action, they said someone else must approve it, even for an action at the AUTO risk
 tier. After a propose, kit 5 offered to check the status "with a read tool" next to the
 `awxpoc proposals show` pointer, paraphrased the AUTO status message, decided from the balances
-that code would not block a proposal, and guessed why a value was null.
+that code would not block a proposal, and guessed why a value was null. A Spanish session
+quoted the status message in English.
 """
 
 import pytest
@@ -86,8 +87,9 @@ def test_the_prompt_leaves_approval_to_the_risk_tier(kit):
 
 
 STATUS_RULE = (
-    "- No tool returns a proposal's current status, so never offer to check one. Say you have "
-    "not checked it and give the user `awxpoc proposals show <proposal_id>`."
+    "- When the user asks for a proposal's current status, say you have not checked it and give "
+    "them `awxpoc proposals show <proposal_id>`. No read_* tool returns it, so never offer to "
+    "check it."
 )
 
 
@@ -95,8 +97,8 @@ STATUS_RULE = (
 def test_after_a_propose_the_prompt_quotes_the_status_and_offers_no_status_check(kit):
     after = " ".join(system_prompt(kit).split("\nAfter you propose\n", 1)[1].split())
     assert (
-        "Then quote the tool's status_message to the user word for word, in the user's language."
-        in after
+        "Then give the user the tool's status_message word for word, translated faithfully if "
+        "the user writes in another language." in after
     )
     assert "using the tool's status_message" not in after
     assert STATUS_RULE in after
