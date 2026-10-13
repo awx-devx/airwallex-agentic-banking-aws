@@ -78,7 +78,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         description=(
             "Propose one pay period's contractor payroll for several employers, copied from the "
             "payroll file. Code prices fees and FX, checks each employer against its own wallet "
-            "only, and starts one approval-gated run per employer. A short employer is "
+            "only, and starts one run per employer. A short employer is "
             "escalated, never funded from another employer."
         ),
         input_schema=_obj(
@@ -99,8 +99,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         description=(
             "Lock FX quotes for one pay period's payroll, same input as propose_run_payroll. "
             "Code quotes each employer's conversions on that employer's own account and stores "
-            "the quotes; it moves no money and runs without approval. Then propose the payroll, "
-            "whose approval binds the exact locked sell amounts. Locks last about an hour."
+            "the quotes; it moves no money. Then propose the payroll, which binds the exact "
+            "locked sell amounts. Locks last about an hour."
         ),
         input_schema=_obj(
             {
@@ -118,7 +118,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         name="propose_release_run_claim",
         kind=ToolKind.PROPOSE,
         description=(
-            "Ask a person to release a stuck run claim for one employer and pay period, left by "
+            "Propose releasing a stuck run claim for one employer and pay period, left by "
             "a run that crashed. Refused while the claim is young enough for its run to be "
             "live. Moves no money: anything that run left in flight stays tracked."
         ),

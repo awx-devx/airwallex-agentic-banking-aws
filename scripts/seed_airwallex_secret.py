@@ -10,8 +10,8 @@ AWX_CLIENT_ID and AWX_API_KEY from its environment, and calls Secrets Manager Pu
 with a JSON object holding `client_id` and `api_key`. No value is written to a file, put on a
 command line or printed.
 
-The Region is --region, else AwxAgentStack.AwxRegion in infra/cdk-outputs.json; with neither,
-the script refuses. The secret is --secret-id, else AwxSpine.AirwallexSecretArn in the outputs
+The Region is --region, else AwxAgentStack.AwxRegion in infra/cdk-outputs.json, else the
+script refuses. The secret is --secret-id, else AwxSpine.AirwallexSecretArn in the outputs
 file, else the AirwallexSecretArn output of the AwxSpine stack in that Region.
 """
 

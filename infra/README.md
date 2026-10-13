@@ -59,8 +59,8 @@ make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"
 make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"
 ```
 
-`make synth` and `make deploy` also take `KITS=k1,k4`, `MODEL_ID`, `FALLBACK_MODEL_ID` and
-`CDK_ARGS`.
+`make synth` and `make deploy` also take `KITS` (for example `KITS=k1,k4`), `MODEL_ID`,
+`FALLBACK_MODEL_ID` and `CDK_ARGS`.
 
 `make bootstrap` runs `cdk bootstrap aws://<12-digit id>/<REGION>` once per account and Region
 from the repository root, where no `cdk.json` loads the app, so it needs no alert address.

@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from awx_common import Money, Operation, OperationResult, OperationStatus, ReadRequest, RiskTier
@@ -162,9 +162,9 @@ class KitNotConfigured(RuntimeError):
 
 
 def kit_today(ctx: PolicyContext) -> date:
-    """The date the kit treats as today: register_shortfall, bridge_shortfall and
+    """The UTC date the kit treats as today: register_shortfall, bridge_shortfall and
     read_bridge_position all decide "due today" from it, so a read never disagrees with them."""
-    return ctx.now.date()
+    return ctx.now.astimezone(UTC).date()
 
 
 def configure_platform(setup: PlatformSetup | None) -> None:

@@ -113,11 +113,11 @@ def read_bridge_position(raw: Mapping[str, Any], ctx: PolicyContext) -> Mapping[
 
     Each queued shortfall carries `due_on`, the due date of the caller's own obligation in the
     current setup. It is None when the setup has no such obligation for the caller, so the
-    agent states a due date only when the kit holds one.
+    agent has a due date only when the kit holds one.
 
     `as_of` is the date the kit treats as today (`kit_today`, the date register_shortfall and
     bridge_shortfall check), and each shortfall's `due_status` compares its `due_on` with it,
-    so the agent never works out a due status itself."""
+    so the agent has a due status without working one out."""
     from .book import queue_key
     from .workflow import book_for, current_setup, kit_today
 

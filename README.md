@@ -132,8 +132,8 @@ layers.
 
 ## Deploying
 
-Set `REGION` in the shell first: `export REGION=us-west-2` for a new deployment, or the Region
-an existing deployment was deployed to, to update it.
+Set `REGION` in the shell first (`export REGION=us-west-2`, or the Region of the deployment
+being updated):
 
 ```sh
 make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"

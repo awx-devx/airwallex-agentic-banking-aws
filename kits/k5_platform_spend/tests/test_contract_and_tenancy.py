@@ -632,3 +632,20 @@ def test_read_bridge_position_gives_each_queued_shortfall_its_own_due_date_and_s
         assert "acct_" not in str(position)
     finally:
         configure_platform(None)
+
+
+@pytest.mark.parametrize(
+    ("zone", "hours", "expected_shift"),
+    [("Australia/Sydney", 9, -1), ("America/Los_Angeles", 20, 1), ("UTC", 12, 0)],
+)
+def test_kit_today_is_the_utc_date_whatever_zone_ctx_now_carries(zone, hours, expected_shift):
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from awx_k5_platform_spend.workflow import kit_today
+
+    day = NOW.date()
+    local = datetime(day.year, day.month, day.day, hours, tzinfo=ZoneInfo(zone))
+    ctx = PolicyContext(Platform().tenant("t-alpha"), local, lambda req: {})
+    assert kit_today(ctx) == local.astimezone(UTC).date()
+    assert kit_today(ctx) == day + timedelta(days=expected_shift)

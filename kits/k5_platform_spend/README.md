@@ -73,14 +73,15 @@ returns an `acct_` value.
 | `propose_issue_card` | PROPOSE | `awx-k5-issue_card` | SINGLE |
 | `propose_simulate_card_spend` | PROPOSE | `awx-k5-simulate_card_spend` | SINGLE |
 
-`read_bridge_position` returns `as_of`, the date the kit treats as today, with the caller's own
-receivable, the amounts of its bridges in flight and its queued shortfalls. Each queued
+`read_bridge_position` returns `as_of`, the UTC date the kit treats as today, with the caller's
+own receivable, the amounts of its bridges in flight and its queued shortfalls. Each queued
 shortfall carries its `obligation_ref`, its `shortfall`, the obligation's `due_on` from the
-platform setup and a `due_status` of `due_today`, `overdue` or `not_yet_due` against `as_of`
-(`due_on` and `due_status` are `null` when the setup holds no such obligation for the caller).
+platform setup and a `due_status` of `due_today`, `overdue` or `not_yet_due` against `as_of`.
+`due_on` and `due_status` are `null` when the setup holds no such obligation for the caller.
 `as_of` comes from the clock `register_shortfall` and `bridge_shortfall` use to decide whether a
 payment is due today, so the read and the actions agree. A shortfall already queued is already
-registered: registering it again only refreshes its queued amount. The read returns no platform
+registered: proposing `register_shortfall` for it again only refreshes its queued amount and
+observation time, and is blocked unless the payment is due today. The read returns no platform
 capital, no other tenant's figures and no account identifiers.
 
 `register_shortfall` and `reconcile_bridge` lower the agent floor to AUTO because neither sends

@@ -387,8 +387,8 @@ action.
 its configuration from the stack outputs file (`--config`, or the `AWXPOC_CONFIG` environment
 variable) and keeps its tokens under `~/.awxpoc`. `awxpoc chat` with no `-m` runs a prompt
 loop. With or without `-m`, it prints the model that answered each reply to stderr, as
-`(answered by <model ID>)`, so that line stays out of stdout. stdout carries the
-`session <id>` line, the loop's `you> ` prompt and the replies.
+`(answered by <model ID>)`. `stdout` carries only the `session <id>` line, the loop's `you> `
+prompt and the replies.
 
 ```
 export AWXPOC_CONFIG=infra/cdk-outputs.json
