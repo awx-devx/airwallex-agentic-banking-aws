@@ -147,8 +147,10 @@ Run from the repository root (see [docs/testing.md](../../docs/testing.md)):
 
 ```bash
 uv run --all-packages pytest packages/awx_agent/tests -m "not sandbox and not synth and not live"
-uv run --all-packages pytest packages/awx_agent/tests -m synth   # cdk synth; slow
+uv run --all-packages pytest packages/awx_agent/tests -m synth
 ```
+
+The `-m synth` run synthesises the stacks with the CDK and is slow.
 
 | Topic | Files | Marker |
 |---|---|---|

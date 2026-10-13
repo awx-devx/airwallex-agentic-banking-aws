@@ -8,7 +8,7 @@ CDK ?= npx -y aws-cdk@2.1144.0
 REGION ?= us-west-2
 # Context for synth and deploy: ACCOUNT and ALERT_EMAIL are required; KITS (k1,k4), MODEL_ID and
 # FALLBACK_MODEL_ID are optional (the model IDs default to REGION's inference profiles).
-CDK_CONTEXT = -c account=$(ACCOUNT) -c alert_email=$(ALERT_EMAIL) -c region=$(strip $(REGION)) \
+CDK_CONTEXT = -c account=$(ACCOUNT) -c alert_email=$(ALERT_EMAIL) -c region=$(REGION_VALUE) \
 	$(if $(KITS),-c kits=$(KITS)) $(if $(MODEL_ID),-c model_id=$(MODEL_ID)) \
 	$(if $(FALLBACK_MODEL_ID),-c fallback_model_id=$(FALLBACK_MODEL_ID))
 # Extra CDK CLI arguments for synth and deploy, for example CDK_ARGS="--require-approval never"
@@ -46,7 +46,7 @@ check: sync lint secret-scan test ## sync, lint, secret scan and offline tests
 # Runs from the repository root, which has no cdk.json, so the CDK CLI does not load the app
 # (the app needs ALERT_EMAIL; bootstrapping does not).
 bootstrap: require-account require-region ## Bootstrap CDK once per account and Region: make bootstrap ACCOUNT=<12-digit id> [REGION=...]
-	$(CDK) bootstrap aws://$(ACCOUNT)/$(strip $(REGION))
+	$(CDK) bootstrap aws://$(ACCOUNT)/$(REGION_VALUE)
 
 synth: require-target require-region ## Synthesise every stack: make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [REGION=...] [KITS=k1,k4] [MODEL_ID=...] [FALLBACK_MODEL_ID=...] [CDK_ARGS=...]
 	cd infra && $(CDK) synth --all $(CDK_CONTEXT) $(CDK_ARGS)
@@ -72,11 +72,25 @@ require-account:
 		exit 2; \
 	fi
 
-# An empty REGION (REGION=$REGION with REGION unset in the shell) overrides the default above,
-# so it is refused here rather than bootstrapping aws://<id>/ or synthesising for no Region.
-# $(error) also stops `make -n`.
+# REGION checks, the same as target_region in infra/app.py, written in make and shell so that
+# bootstrap needs no virtual environment. The pattern, prefixes and messages match
+# REGION_CODE, OTHER_PARTITION_PREFIXES, REGION_CODE_MESSAGE and OTHER_PARTITION_MESSAGE in
+# packages/awx_common/src/awx_common/regions.py (a test pins them together).
+REGION_CODE := ^[a-z]{2}(-[a-z]+)+-[0-9]+$$
+OTHER_PARTITION_PREFIXES := cn- us-gov- us-iso- us-isob- eu-isoe-
+REGION_VALUE = $(strip $(REGION))
+REGION_CODE_MESSAGE = REGION=$(REGION_VALUE) is not an AWS Region code such as us-west-2
+OTHER_PARTITION_MESSAGE = REGION=$(REGION_VALUE) is not in the commercial AWS partition (aws). This app supports only that partition
+
+# An empty REGION (REGION=$REGION with REGION unset in the shell) overrides the default above.
+# It is refused here, and so are a value that is not a Region code and a Region in another
+# partition, before cdk bootstraps aws://<id>/<value> or synthesises for it. The checks run
+# as make expands the recipe, so $(error) also stops `make -n`.
 require-region:
-	$(if $(strip $(REGION)),@:,$(error REGION is empty. Set it first, for example: export REGION=us-west-2))
+	$(if $(REGION_VALUE),,$(error REGION is empty. Set it first, for example: export REGION=us-west-2))
+	$(if $(shell printf '%s\n' '$(REGION_VALUE)' | grep -Eqx '$(REGION_CODE)' && echo ok),,$(error $(REGION_CODE_MESSAGE)))
+	$(if $(filter $(addsuffix %,$(OTHER_PARTITION_PREFIXES)),$(REGION_VALUE)),$(error $(OTHER_PARTITION_MESSAGE)))
+	@:
 
 help: ## List every target
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z-]*:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)

@@ -63,9 +63,9 @@ class AgentCoreRuntime(Construct):
         # The role invokes inference profiles in the stack Region, and the foundation models
         # behind them in any Region only through those profiles (the bedrock:InferenceProfileArn
         # condition). The profile's destination Regions are AWS's to change, so the grant
-        # names none. The trailing * covers a dated or versioned model ID behind a profile; it
-        # also matches other model IDs with the same start (anthropic.claude-sonnet-5* matches
-        # Claude Sonnet 5.5), and the condition keeps it to the role's own profiles.
+        # names none. The trailing * covers a dated or versioned model ID behind a profile. It
+        # also matches any later model ID that starts the same way, and the condition limits it
+        # to the role's own profiles.
         # A plain foundation-model ID (no profile prefix) is granted in the stack Region only.
         invoke = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
         profile_ids = [m for m in model_ids if is_inference_profile(m)]

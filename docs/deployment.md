@@ -40,8 +40,10 @@ Pass the same `REGION` to every command for a deployment. A `make` run with no `
 deploys to `us-west-2`, so an existing deployment in another Region is updated only by
 passing the Region it was deployed to (`REGION=ap-southeast-2` for a deployment there). A run
 with a different `REGION` deploys a separate copy; copies in different Regions of the same
-account do not clash. The commands in this runbook read `REGION` from the shell, so setting
-it is the first step of "Bootstrap and deploy". `make` refuses an empty `REGION`.
+account do not clash. The `make bootstrap` and `make deploy` lines and the `aws` commands in
+this runbook read `REGION` from the shell. The `make` lines pass `REGION="$REGION"`, which
+is an empty value when the shell has no `REGION` set, and `make` refuses an empty `REGION`.
+This is why "Bootstrap and deploy" starts by setting it.
 
 ## Prerequisites
 
@@ -58,11 +60,11 @@ it is the first step of "Bootstrap and deploy". `make` refuses an empty `REGION`
 
 ## Bootstrap and deploy
 
-Set the Region first. Every command in this runbook reads it, and a new shell needs it set
-again:
+Set the Region first: `us-west-2`, or the Region of the deployment being updated. A new
+shell needs it set again:
 
 ```
-export REGION=us-west-2    # or the Region of the deployment being updated
+export REGION=us-west-2
 ```
 
 Then build and test:
@@ -89,11 +91,11 @@ fails for want of an alert address.
 
 `cdk deploy` asks a person at a terminal to approve each stack's AWS Identity and Access
 Management (IAM) changes. A shell with no terminal (a continuous integration (CI) job, a
-coding agent) cannot answer, and the deploy stops before it creates anything. There, review
-the IAM changes first if you need to (`cdk diff` from `infra/`, with the same
-`-c account=... -c alert_email=... -c region=...` context, plus `-c model_id` and
-`-c fallback_model_id` if you set them), then pass the CDK CLI's approval flag through
-`CDK_ARGS`:
+coding agent) cannot answer, and the deploy stops before it creates anything. There, you can
+review the IAM changes first with `cdk diff` from `infra/`, passing the same context
+`make deploy` passes: `-c account=... -c alert_email=... -c region=...`, plus `-c kits=...`,
+`-c model_id=...` and `-c fallback_model_id=...` if you set them. Then pass the CDK CLI's
+approval flag through `CDK_ARGS`:
 
 ```
 AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> \
@@ -216,16 +218,21 @@ through the table (kit 6 payroll, kit 7 reconciliation), so `deploy/k6.yaml` and
 
 Each password goes into Secrets Manager as `awx-poc/demo-users/<username>`, a JSON object
 `{"username": ..., "password": ...}`. `scripts/deployed_security_checks.py` signs in from these
-secrets. The function below creates one user without putting the password on a command line.
+secrets. The function below, `create_demo_user <username> <tenant_id> <requester|approver>`, creates
+one user without putting the password on a command line. It calls the AWS CLI through
+`awsd`, which adds the deploy profile and `REGION` and works in bash and zsh.
 The password policy needs 14 or more characters with upper and lower case, a digit and a
 symbol:
 
 ```
 POOL=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["UserPoolId"])')
-AWS="aws --profile awx-deploy --region ${REGION:?set REGION first, for example: export REGION=us-west-2}"
+awsd() {
+  aws --profile awx-deploy --region "${REGION:?set REGION first, for example: export REGION=us-west-2}" "$@"
+}
 
-create_demo_user() {  # create_demo_user <username> <tenant_id> <requester|approver>
+create_demo_user() {
   local name=$1 tenant=$2 group=$3
+  [ -n "${REGION:-}" ] || { echo "set REGION first, for example: export REGION=us-west-2" >&2; return 1; }
   ( umask 077
     python3 - "$POOL" "$name" <<'EOF'
 import json, secrets, sys
@@ -236,12 +243,12 @@ json.dump({"UserPoolId": pool, "Username": name, "Password": password, "Permanen
           open("/tmp/awx-user-password.json", "w"))
 EOF
   )
-  $AWS secretsmanager create-secret --name "awx-poc/demo-users/$name" \
+  awsd secretsmanager create-secret --name "awx-poc/demo-users/$name" \
       --secret-string file:///tmp/awx-user-secret.json
-  $AWS cognito-idp admin-create-user --user-pool-id "$POOL" --username "$name" \
+  awsd cognito-idp admin-create-user --user-pool-id "$POOL" --username "$name" \
       --message-action SUPPRESS --user-attributes Name=custom:tenant_id,Value="$tenant"
-  $AWS cognito-idp admin-set-user-password --cli-input-json file:///tmp/awx-user-password.json
-  $AWS cognito-idp admin-add-user-to-group --user-pool-id "$POOL" --username "$name" \
+  awsd cognito-idp admin-set-user-password --cli-input-json file:///tmp/awx-user-password.json
+  awsd cognito-idp admin-add-user-to-group --user-pool-id "$POOL" --username "$name" \
       --group-name "$group"
   rm -f /tmp/awx-user-secret.json /tmp/awx-user-password.json
 }
@@ -399,13 +406,14 @@ action.
 
 `awxpoc` (package `awx_agent`) talks to the AgentCore Runtime and the approval API. It reads
 its configuration from the stack outputs file (`--config`, or the `AWXPOC_CONFIG` environment
-variable) and keeps its tokens under `~/.awxpoc`.
+variable) and keeps its tokens under `~/.awxpoc`. `awxpoc chat` with no `-m` runs a prompt
+loop.
 
 ```
 export AWXPOC_CONFIG=infra/cdk-outputs.json
 uv run --all-packages awxpoc login --username demo-platform-requester
 uv run --all-packages awxpoc chat --kit k1 -m "What do we owe this week?"
-uv run --all-packages awxpoc chat --kit k1          # a prompt loop
+uv run --all-packages awxpoc chat --kit k1
 uv run --all-packages awxpoc proposals list --status PENDING
 uv run --all-packages awxpoc proposals show <proposal_id>
 

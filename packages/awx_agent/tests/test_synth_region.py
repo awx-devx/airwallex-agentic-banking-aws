@@ -108,7 +108,12 @@ def test_a_region_outside_the_table_fails_synth_naming_the_overrides(overrides, 
     message = str(caught.value)
     assert "REGION=ap-northeast-1" in message
     # Only the variables still missing are named.
-    assert f"Pass {missing} with model or inference profile IDs" in message
+    ids = (
+        "model or inference profile IDs"
+        if " and " in missing
+        else "a model or inference profile ID"
+    )
+    assert f"Pass {missing} set to {ids} that this Region offers" in message
 
 
 @pytest.mark.parametrize("region", [DEFAULT_REGION, "ap-southeast-2"])

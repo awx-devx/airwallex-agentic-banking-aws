@@ -121,7 +121,8 @@ def _default_agent(model_id: str, region: str, kit: str, tools: list[Any], messa
     from strands.models import BedrockModel
 
     # No sampling parameters: Claude Sonnet 5 rejects `temperature` with a ValidationException.
-    # The kits' money safety is in code (policy checks, approvals, workflows), not in sampling.
+    # Policy checks, approvals and workflows in code guard money movement. The agent does not
+    # rely on sampling settings for that.
     return Agent(
         model=BedrockModel(model_id=model_id, region_name=region),
         system_prompt=system_prompt(kit),

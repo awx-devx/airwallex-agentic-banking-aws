@@ -114,6 +114,13 @@ def test_the_default_agent_sends_no_sampling_parameters():
     config = agent.model.get_config()
     assert config["model_id"] == rt.DEFAULT_MODEL_ID
     assert not {"temperature", "top_p", "top_k"} & set(config)
+    # Check the request Strands builds, not only the config. BedrockModel.format_request is a
+    # Strands internal outside its documented API, pinned by uv.lock (strands-agents 1.58.0),
+    # so a Strands upgrade that changes the request shape fails this test.
+    request = agent.model.format_request([{"role": "user", "content": [{"text": "hi"}]}])
+    assert request["modelId"] == rt.DEFAULT_MODEL_ID
+    assert request["inferenceConfig"] == {}
+    assert "additionalModelRequestFields" not in request
 
 
 class RejectedRequest(Exception):

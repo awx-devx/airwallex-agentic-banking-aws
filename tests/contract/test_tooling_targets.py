@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from awx_common.regions import DEFAULT_REGION
+from awx_common.regions import (
+    DEFAULT_REGION,
+    OTHER_PARTITION_MESSAGE,
+    OTHER_PARTITION_PREFIXES,
+    REGION_CODE,
+    REGION_CODE_MESSAGE,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 CONTRACT_DIR = REPO / "tests" / "contract"
@@ -107,12 +114,42 @@ def test_region_and_model_ids_reach_synth_and_deploy(target):
     assert "-c fallback_model_id=m.fallback" in line
 
 
+def _makefile_variable(name: str) -> str:
+    lines = (REPO / "Makefile").read_text().splitlines()
+    (line,) = [line for line in lines if line.startswith(f"{name} ")]
+    return line.split("=", 1)[1].strip()
+
+
+def test_makefile_region_checks_are_the_python_ones():
+    # make writes a literal $ as $$, and refers to the value as $(REGION_VALUE).
+    assert _makefile_variable("REGION_CODE").replace("$$", "$") == REGION_CODE
+    assert tuple(_makefile_variable("OTHER_PARTITION_PREFIXES").split()) == (
+        OTHER_PARTITION_PREFIXES
+    )
+    for name, message in (
+        ("REGION_CODE_MESSAGE", REGION_CODE_MESSAGE),
+        ("OTHER_PARTITION_MESSAGE", OTHER_PARTITION_MESSAGE),
+    ):
+        assert _makefile_variable(name) == message.format(region="$(REGION_VALUE)")
+
+
 @needs_make
 @pytest.mark.parametrize("target", ["bootstrap", "synth", "deploy"])
-@pytest.mark.parametrize("region", ["", "  "], ids=["empty", "whitespace"])
-def test_an_empty_region_is_refused_before_cdk_runs(target, region):
+@pytest.mark.parametrize(
+    ("region", "message"),
+    [
+        ("", "REGION is empty. Set it first, for example: export REGION=us-west-2"),
+        ("  ", "REGION is empty. Set it first, for example: export REGION=us-west-2"),
+        ("US-WEST-2", REGION_CODE_MESSAGE.format(region="US-WEST-2")),
+        ("zz test", REGION_CODE_MESSAGE.format(region="zz test")),
+        ("us-gov-west-1", OTHER_PARTITION_MESSAGE.format(region="us-gov-west-1")),
+    ],
+    ids=["empty", "whitespace", "upper-case", "not-a-code", "other-partition"],
+)
+def test_an_empty_region_is_refused_before_cdk_runs(target, region, message):
     # `REGION=$REGION` with REGION unset in the shell passes an empty value, which overrides
-    # the Makefile default; it must stop with a message, even under `make -n`.
+    # the Makefile default. It, a value that is not a Region code and a Region in another
+    # partition must stop with a message before cdk runs, even under `make -n`.
     unset = {"ALERT_EMAIL", "ACCOUNT", "CDK_ARGS", "REGION", "MODEL_ID", "FALLBACK_MODEL_ID"}
     done = subprocess.run(  # noqa: S603 - fixed argv, no shell
         [
@@ -130,8 +167,7 @@ def test_an_empty_region_is_refused_before_cdk_runs(target, region):
         env={k: v for k, v in os.environ.items() if k not in unset},
     )
     assert done.returncode != 0
-    assert "REGION is empty" in done.stderr
-    assert "export REGION=us-west-2" in done.stderr
+    assert message in done.stderr
     assert "aws-cdk" not in done.stdout
 
 
@@ -215,3 +251,38 @@ def test_a_sandbox_run_without_fixture_ids_ends_with_the_skip_line():
     assert "passed" not in lines[-1]
     # The skip line closes the summary, just above pytest's own counts line.
     assert "CONTRACT SUITE SKIPPED: all" in lines[-2]
+
+
+MAKE_REGION_TARGET = re.compile(r"\bmake\s+(bootstrap|synth|deploy)(?![\w-])")
+
+
+def test_every_documented_make_bootstrap_synth_and_deploy_passes_region():
+    # A documented command (in a fenced code block) without REGION= deploys to the default
+    # Region in a shell where REGION is unset, so it can create a second deployment beside the
+    # one being updated.
+    tracked = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "-C", str(REPO), "ls-files", "*.md"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert tracked
+    missing = []
+    for name in tracked:
+        lines = (REPO / name).read_text().splitlines()
+        in_code = False
+        for number, line in enumerate(lines, 1):
+            if line.lstrip().startswith("```"):
+                in_code = not in_code
+                continue
+            # Commands sit in fenced code blocks; prose that names a target is not a command.
+            if not in_code or not MAKE_REGION_TARGET.search(line):
+                continue
+            # A command continued with a trailing backslash counts as one line.
+            command, rest = line, number
+            while command.rstrip().endswith("\\") and rest < len(lines):
+                command += " " + lines[rest]
+                rest += 1
+            if "REGION=" not in command:
+                missing.append(f"{name}:{number}: {line.strip()}")
+    assert not missing, "make lines without REGION=:\n" + "\n".join(missing)

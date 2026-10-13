@@ -29,6 +29,10 @@ from awx_common.kits import KIT_DIRS  # noqa: E402
 from awx_common.regions import (  # noqa: E402
     DEFAULT_REGION,
     INFERENCE_PROFILE_PREFIX,
+    OTHER_PARTITION_MESSAGE,
+    OTHER_PARTITION_PREFIXES,
+    REGION_CODE,
+    REGION_CODE_MESSAGE,
     UnsupportedRegionError,
     default_model_ids,
 )
@@ -52,13 +56,11 @@ def target_account(app: cdk.App) -> str:
     return str(account)
 
 
-REGION_CODE = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d+$")
-
-
 def target_region(app: cdk.App) -> str:
     """The Region to build for: `-c region=<region>`, else DEFAULT_REGION when the context is
-    absent. A present but empty value (REGION=$REGION with REGION unset) is refused, never
-    read as the default, and so is anything that is not a Region code."""
+    absent. A present but empty value (REGION=$REGION with REGION unset) is refused, and is
+    never read as the default. A value that is not a Region code is refused too, and so is a
+    Region outside the commercial `aws` partition."""
     value = app.node.try_get_context("region")
     if value is None:
         return DEFAULT_REGION
@@ -68,27 +70,39 @@ def target_region(app: cdk.App) -> str:
             "REGION is empty (-c region= has no value). Set it to the Region to deploy to, "
             "for example: export REGION=us-west-2"
         )
-    if not REGION_CODE.match(region):
-        raise ValueError(f"REGION={region} is not an AWS Region code such as us-west-2")
+    if not re.match(REGION_CODE, region):
+        raise ValueError(REGION_CODE_MESSAGE.format(region=region))
+    if region.startswith(OTHER_PARTITION_PREFIXES):
+        raise ValueError(OTHER_PARTITION_MESSAGE.format(region=region))
     return region
 
 
-def _model_id_context(app: cdk.App, key: str, variable: str) -> str | None:
+def _model_id_context(app: cdk.App, key: str, variable: str, example: str) -> str | None:
     value = str(app.node.try_get_context(key) or "").strip()
     if value.startswith("arn:"):
         raise ValueError(
-            f"{variable}={value} is an ARN. Pass a model ID or an inference profile ID, "
-            "for example us.anthropic.claude-sonnet-5; ARNs are not supported."
+            f"{variable}={value} is an ARN (Amazon Resource Name), which is not supported. "
+            f"Pass a model ID or an inference profile ID, for example {example}."
         )
     return value or None
+
+
+def _example_model_ids(region: str) -> tuple[str, str]:
+    """The Region's default model IDs, or the default Region's when it has none, for use as
+    examples in error messages."""
+    try:
+        return default_model_ids(region)
+    except UnsupportedRegionError:
+        return default_model_ids(DEFAULT_REGION)
 
 
 def target_model_ids(app: cdk.App, region: str) -> tuple[str, str]:
     """(primary, fallback) model IDs: `-c model_id` and `-c fallback_model_id`, each falling
     back to the Region's default inference profile. A Region with no defaults needs
     `model_id` and `fallback_model_id`."""
-    primary = _model_id_context(app, "model_id", "MODEL_ID")
-    fallback = _model_id_context(app, "fallback_model_id", "FALLBACK_MODEL_ID")
+    example_primary, example_fallback = _example_model_ids(region)
+    primary = _model_id_context(app, "model_id", "MODEL_ID", example_primary)
+    fallback = _model_id_context(app, "fallback_model_id", "FALLBACK_MODEL_ID", example_fallback)
     if primary and fallback:
         return primary, fallback
     try:
@@ -102,10 +116,15 @@ def target_model_ids(app: cdk.App, region: str) -> tuple[str, str]:
             )
             if not given
         ]
+        target = (
+            "set to model or inference profile IDs"
+            if len(missing) > 1
+            else "set to a model or inference profile ID"
+        )
         raise ValueError(
-            f"REGION={region} has no default model IDs (supported: "
+            f"REGION={region} has no default model IDs (Regions with defaults: "
             f"{', '.join(sorted(INFERENCE_PROFILE_PREFIX))}). Pass {' and '.join(missing)} "
-            "with model or inference profile IDs that this Region offers."
+            f"{target} that this Region offers."
         ) from None
     return primary or default_primary, fallback or default_fallback
 

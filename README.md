@@ -107,13 +107,20 @@ Prerequisites: Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js for th
 Development Kit (CDK) command line, which the Makefile runs through `npx`.
 
 ```sh
-make help      # list every target
-make sync      # create the uv workspace environment
-make hooks     # run the secret scan on every commit (git config core.hooksPath .githooks)
-make check     # lint, secret scan and offline tests (no network once synced)
-make synth-test   # cdk synth and the synth-time security tests
-make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com   # synthesise every stack
+make help
+make sync
+make hooks
+make check
+make synth-test
+export REGION=us-west-2
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com REGION="$REGION"
 ```
+
+`make help` lists every target. `make sync` creates the uv workspace environment, and
+`make hooks` runs the secret scan on every commit (`git config core.hooksPath .githooks`).
+`make check` runs the lint, the secret scan and the offline tests (no network once synced).
+`make synth-test` runs cdk synth and the synth-time security tests, and `make synth`
+synthesises every stack for `REGION`.
 
 `make check` and `make synth-test` take about 4 to 5 minutes each, and pytest prints only
 dots while it runs. `make synth` needs no AWS credentials, but downloads the pinned
@@ -124,10 +131,13 @@ layers.
 ## Deploying
 
 ```sh
-export REGION=us-west-2    # or the Region of the deployment being updated
-make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"                       # once per account and Region
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"    # every stack
+export REGION=us-west-2
+make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"
 ```
+
+To update an existing deployment, set `REGION` to the Region it was deployed to.
+`make bootstrap` runs once per account and Region, and `make deploy` deploys every stack.
 
 `cdk deploy` asks a person at a terminal to approve AWS Identity and Access Management (IAM)
 changes. In a shell with no terminal

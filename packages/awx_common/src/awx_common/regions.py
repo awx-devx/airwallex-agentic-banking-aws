@@ -15,6 +15,20 @@ from __future__ import annotations
 
 DEFAULT_REGION = "us-west-2"
 
+# A Region code: lower-case letters and hyphens ending in a number (us-west-2, ap-southeast-2).
+# The Makefile's require-region target uses the same pattern (a test pins them together).
+REGION_CODE = r"^[a-z]{2}(-[a-z]+)+-[0-9]+$"
+REGION_CODE_MESSAGE = "REGION={region} is not an AWS Region code such as us-west-2"
+
+# Region code prefixes of the partitions other than the commercial `aws` partition (China,
+# AWS GovCloud (US) and the isolated Regions). Their ARNs use another partition name, which
+# the stacks' ARNs do not.
+OTHER_PARTITION_PREFIXES = ("cn-", "us-gov-", "us-iso-", "us-isob-", "eu-isoe-")
+OTHER_PARTITION_MESSAGE = (
+    "REGION={region} is not in the commercial AWS partition (aws). "
+    "This app supports only that partition"
+)
+
 PRIMARY_MODEL = "anthropic.claude-sonnet-5"
 FALLBACK_MODEL = "anthropic.claude-sonnet-4-5-20250929-v1:0"
 
@@ -60,9 +74,9 @@ def default_model_ids(region: str) -> tuple[str, str]:
     prefix = INFERENCE_PROFILE_PREFIX.get(region)
     if prefix is None:
         raise UnsupportedRegionError(
-            f"REGION={region} has no default model IDs (supported: "
+            f"REGION={region} has no default model IDs (Regions with defaults: "
             f"{', '.join(sorted(INFERENCE_PROFILE_PREFIX))}). Pass MODEL_ID and "
-            "FALLBACK_MODEL_ID (CDK context model_id and fallback_model_id) with model or "
+            "FALLBACK_MODEL_ID (CDK context model_id and fallback_model_id) set to model or "
             "inference profile IDs that this Region offers."
         )
     return f"{prefix}.{PRIMARY_MODEL}", f"{prefix}.{FALLBACK_MODEL}"

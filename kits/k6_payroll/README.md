@@ -161,11 +161,13 @@ these GET paths:
 | platform | `/api/v1/charges`, `/api/v1/charges/{id}` |
 | employer | `/api/v1/balances/current`, `/api/v1/fx/rates/current`, `/api/v1/beneficiaries`, `/api/v1/transfers`, `/api/v1/transfers/{id}`, `/api/v1/fx/conversions`, `/api/v1/fx/conversions/{id}`, `/api/v1/financial_transactions` |
 
-To synth or deploy only this kit:
+To synth or deploy only this kit, with `REGION` set to `us-west-2` or the Region of the
+deployment being updated:
 
 ```
-make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k6
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k6
+export REGION=us-west-2
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k6 REGION="$REGION"
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k6 REGION="$REGION"
 ```
 
 A partial deploy over a full one removes the other kits' tools from the agent stack. See
@@ -224,7 +226,7 @@ owner-only connected-accounts file (`AWX_K6_RECORD` optionally names a run-recor
 Nothing in the repository creates the accounts file. Write it yourself, outside the repository,
 with mode 600: one line per employer, `KEY: acct_...`, and `#` starts a comment.
 
-```
+```text
 # kit 6 employer connected accounts (poc-i6-a, poc-i6-b, poc-i6-c)
 K6_EMPLOYER_A_ACCT: acct_...
 K6_EMPLOYER_B_ACCT: acct_...
