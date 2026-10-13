@@ -33,7 +33,9 @@ over every stack, and each suppression carries its reason in the code.
 | Context | Default | Meaning |
 |---|---|---|
 | `account` | the `CDK_DEFAULT_ACCOUNT` environment variable | The 12-digit AWS account to build for. If neither is set, synth fails rather than target an account by accident. |
-| `region` | `ap-southeast-2` | The AWS Region. |
+| `region` | `us-west-2` (`DEFAULT_REGION` in `awx_common.regions`) | The AWS Region. `make` passes `REGION`. See "Region and models" in [docs/deployment.md](../docs/deployment.md) for the Region table. |
+| `model_id` | the Region's primary inference profile, for example `us.anthropic.claude-sonnet-5` | The agent's model or inference profile ID. `make` passes `MODEL_ID`. Required, with `fallback_model_id`, for a Region outside the table. |
+| `fallback_model_id` | the Region's fallback inference profile, for example `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | The model the agent falls back to. `make` passes `FALLBACK_MODEL_ID`. |
 | `alert_email` | `AWX_ALERT_EMAIL` | Where alarms and budget alerts go. Required. The SNS subscription's logical id includes the address, so changing it replaces the subscription. |
 | `kits` | every kit | A comma-separated subset, for example `-c kits=k1,k4`. An empty or unknown list is refused. See "Partial deploys". |
 | `sandbox` | `true` | Sandbox mode (runner rule 10 in `awx_common.workflow`): a finality poll may run the kit's sandbox simulation to advance an object, for example to settle a transfer. `-c sandbox=false` sets `AWX_SANDBOX_MODE=0` on every kit-step Lambda. Only sandbox mode is deployed and tested. |
@@ -51,13 +53,13 @@ From the repository root:
 make sync
 make check
 make synth-test
-make synth  ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [KITS=k1,k4]
-make bootstrap ACCOUNT=<12-digit id>
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [KITS=k1,k4] [CDK_ARGS=...]
+make synth  ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [REGION=...] [KITS=k1,k4]
+make bootstrap ACCOUNT=<12-digit id> [REGION=...]
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [REGION=...] [KITS=k1,k4] [CDK_ARGS=...]
 ```
 
-`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/ap-southeast-2` once per account from
-the repository root, where no `cdk.json` loads the app, so it needs no alert address.
+`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/<REGION>` once per account and Region
+from the repository root, where no `cdk.json` loads the app, so it needs no alert address.
 `CDK_ARGS` passes extra CDK CLI arguments to `cdk synth` and `cdk deploy`. `cdk deploy` asks a
 person at a terminal to approve AWS Identity and Access Management (IAM) changes. A shell
 with no terminal (a continuous
@@ -207,7 +209,9 @@ order:
    CloudFormation, then schedule the key's deletion (7 to 30 days) once nothing it encrypts is
    left.
 
-The AWS Budget `awx-poc-monthly` is a spine resource, so `cdk destroy --all` deletes it.
+The AWS Budget `awx-poc-monthly-<region>` is a spine resource, so `cdk destroy --all` deletes
+it. It counts only the costs of its own Region, so a deployment in another Region of the same
+account has its own budget.
 
 ### Outside CloudFormation
 

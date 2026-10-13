@@ -124,8 +124,8 @@ layers.
 ## Deploying
 
 ```sh
-make bootstrap ACCOUNT=<12-digit id>                       # once per account
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>    # every stack, to ap-southeast-2
+make bootstrap ACCOUNT=<12-digit id>                       # once per account and Region
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>    # every stack, to us-west-2 unless REGION=... is set
 ```
 
 `cdk deploy` asks a person at a terminal to approve AWS Identity and Access Management (IAM)
@@ -158,8 +158,9 @@ Airwallex secret, create demo users and load each kit's state with `awx-deploy`.
 ## Limitations
 
 - Sandbox only. The Airwallex client refuses any host but the sandbox.
-- Single Region, ap-southeast-2, for the Australian Amazon Bedrock inference profiles the agent
-  uses.
+- One AWS Region per deployment (`REGION`, default `us-west-2`). Default model IDs exist for the
+  Regions listed in [docs/deployment.md](docs/deployment.md); another Region needs `MODEL_ID`
+  and `FALLBACK_MODEL_ID`.
 - No web UI. People use the `awxpoc` command line.
 - No schedules. Scheduled actions (kit 6 payroll, kit 7 collection and reconciliation, kit 8
   settlement and reconciliation) are started by an operator with `awx-deploy trigger`, so no

@@ -6,20 +6,53 @@ create demo users, load each kit's state, then use the agent. The AWS Cloud Deve
 [infra/README.md](../infra/README.md).
 
 Every command runs from the repository root unless it says otherwise. Examples use
-`--profile awx-deploy`. Replace it with your own profile. The deployment targets
-`ap-southeast-2`: `make deploy` has no Region variable, and the model grants and
-`scripts/deployed_security_checks.py` assume that Region.
+`--profile awx-deploy`. Replace it with your own profile.
+
+## Region and models
+
+The AWS Region is a deploy-time choice. The `make` targets read these variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REGION` | `us-west-2` | The AWS Region to bootstrap and deploy to (CDK context `region`). |
+| `MODEL_ID` | the primary inference profile of `REGION` | The agent's model or inference profile ID (CDK context `model_id`). |
+| `FALLBACK_MODEL_ID` | the fallback inference profile of `REGION` | The model the agent falls back to when the primary is unavailable (CDK context `fallback_model_id`). |
+
+The default Region and the Region table are defined once, in
+`packages/awx_common/src/awx_common/regions.py`. The agent's models are Claude Sonnet 5
+(primary) and Claude Sonnet 4.5 (fallback), called through the geographic cross-Region
+inference profile of the deploy Region:
+
+| Deploy Region | Primary model ID | Fallback model ID |
+|---|---|---|
+| `us-east-1`, `us-east-2`, `us-west-1`, `us-west-2`, `ca-central-1` | `us.anthropic.claude-sonnet-5` | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| `eu-central-1`, `eu-north-1`, `eu-west-1`, `eu-west-2`, `eu-west-3` | `eu.anthropic.claude-sonnet-5` | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| `ap-southeast-2` | `au.anthropic.claude-sonnet-5` | `au.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+
+Any other Region that offers Amazon Bedrock AgentCore needs `MODEL_ID` and
+`FALLBACK_MODEL_ID` set to model or inference profile IDs that Region offers; synth fails
+with a message naming them otherwise. The Runtime role may invoke its inference profiles in
+the deploy Region, and the foundation models behind them only through those profiles, so the
+grant does not list the Regions a profile routes to. A plain foundation-model ID (with no
+profile prefix) is granted in the deploy Region only.
+
+Pass the same `REGION` to every command for one deployment. A run with no `REGION` deploys
+to `us-west-2`, so an existing deployment in another Region is updated only by passing the
+Region it was deployed to (`REGION=ap-southeast-2` for a deployment there). A run with a
+different `REGION` deploys a separate copy; copies in different Regions of one account do not
+clash.
+Setting it once in the shell covers the `make` targets and the `aws` commands below:
+
+```
+export REGION=<region>    # for example us-west-2
+```
 
 ## Prerequisites
 
-- An AWS account and operator credentials with administrator access to it in `ap-southeast-2`.
-- Amazon Bedrock model access, in that Region, to the agent's model and its fallback. The model
-  IDs are set in `packages/awx_agent/src/awx_agent/runtime/app.py` and granted in
-  `infra/constructs/agentcore_runtime.py`: the Australian cross-Region inference profiles
-  `au.anthropic.claude-sonnet-5` (primary) and `au.anthropic.claude-sonnet-4-5-20250929-v1:0`
-  (fallback). These profiles route to `ap-southeast-2` and `ap-southeast-4`. Another Region
-  needs other model IDs and a change to `AU_INFERENCE_REGIONS` in
-  `infra/constructs/agentcore_runtime.py`.
+- An AWS account and operator credentials with administrator access to it in the deploy
+  Region.
+- Amazon Bedrock model access, in that Region, to the agent's model and its fallback (see
+  "Region and models").
 - Amazon Bedrock AgentCore (Runtime and Gateway) available in the Region.
 - An Airwallex sandbox account and its API credentials (a client ID and an API key). Kits 5 to
   8 also need connected accounts and platform payments enabled on that sandbox account.
@@ -40,12 +73,12 @@ in [infra/README.md](../infra/README.md)). Each takes about 4 to 5 minutes, and 
 only dots while it runs. Then bootstrap the account and Region once, and deploy every stack:
 
 ```
-AWS_PROFILE=awx-deploy make bootstrap ACCOUNT=<12-digit id>
-AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>
+AWS_PROFILE=awx-deploy make bootstrap ACCOUNT=<12-digit id> REGION=$REGION
+AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION=$REGION
 ```
 
-`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/ap-southeast-2` from the repository
-root. It needs no alert address: the root has no `cdk.json`, so the CDK CLI does not load the
+`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/<region>` from the repository
+root, once per account and Region. It needs no alert address: the root has no `cdk.json`, so the CDK CLI does not load the
 app. Bootstrapping from `infra/` loads the app, which then fails for want of an alert address.
 
 `cdk deploy` asks a person at a terminal to approve each stack's AWS Identity and Access
@@ -81,7 +114,7 @@ export AWX_CLIENT_ID AWX_API_KEY
 ( umask 077
   python3 -c 'import json, os; print(json.dumps({"client_id": os.environ["AWX_CLIENT_ID"], "api_key": os.environ["AWX_API_KEY"]}))' \
       > /tmp/awx-secret.json )
-aws --profile awx-deploy --region ap-southeast-2 secretsmanager put-secret-value \
+aws --profile awx-deploy --region "$REGION" secretsmanager put-secret-value \
     --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
 rm /tmp/awx-secret.json; unset AWX_CLIENT_ID AWX_API_KEY
 ```
@@ -97,7 +130,7 @@ SECRET_ARN=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.js
 ( umask 077
   uv run --all-packages python -c 'import json; from awx_spine import EnvFileCredentials; c = EnvFileCredentials().get(); print(json.dumps({"client_id": c.client_id, "api_key": c.api_key}))' \
       > /tmp/awx-secret.json )
-aws --profile awx-deploy --region ap-southeast-2 secretsmanager put-secret-value \
+aws --profile awx-deploy --region "$REGION" secretsmanager put-secret-value \
     --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
 rm /tmp/awx-secret.json
 ```
@@ -108,7 +141,7 @@ To read another file, pass its path: `EnvFileCredentials(Path("<file>"))`, with
 the later stacks still deploy, read it from the spine stack's outputs instead:
 
 ```
-SECRET_ARN=$(aws --profile awx-deploy --region ap-southeast-2 cloudformation describe-stacks \
+SECRET_ARN=$(aws --profile awx-deploy --region "$REGION" cloudformation describe-stacks \
     --stack-name AwxSpine --query "Stacks[0].Outputs[?OutputKey=='AirwallexSecretArn'].OutputValue" \
     --output text)
 ```
@@ -181,7 +214,7 @@ symbol:
 
 ```
 POOL=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["UserPoolId"])')
-AWS="aws --profile awx-deploy --region ap-southeast-2"
+AWS="aws --profile awx-deploy --region $REGION"
 
 create_demo_user() {  # create_demo_user <username> <tenant_id> <requester|approver>
   local name=$1 tenant=$2 group=$3
@@ -243,7 +276,10 @@ awx-deploy [--profile P] [--region R] trigger <kit> <action> <intent.json> --ten
 ```
 
 Run it as `uv run --all-packages awx-deploy ...`. `--tenants-table`, `--ledger-table` and
-`--secret-arn` override the stack lookup.
+`--secret-arn` override the stack lookup. With no `--region` it uses the Region recorded in
+`infra/cdk-outputs.json` (the `AwxRegion` output), and `us-west-2` when that file does not
+exist. The `awxpoc` CLI takes the Region from the outputs file it is given (`--config` or
+`AWXPOC_CONFIG`) and has no Region default.
 
 `deploy/k1.yaml`, `k5.yaml`, `k6.yaml`, `k7.yaml` and `k8.yaml` hold each kit's tenants rows
 and its ordered operator commands, taken from the "Setting up a deployed kit" section of the
@@ -389,7 +425,8 @@ output still help to see which step failed.
 `scripts/deployed_security_checks.py` runs read-only checks against the deployed stacks. No
 money-moving tool is called. It needs the full deploy (all eight kit stacks), the
 `demo-platform-requester`, `demo-k6-operator` and `demo-k5-operator-approver` users and their
-`awx-poc/demo-users/*` secrets, and the outputs file. It uses the Region `ap-southeast-2`.
+`awx-poc/demo-users/*` secrets, and the outputs file. It runs in the Region the outputs file
+records (the `AwxRegion` output of `AwxAgentStack`).
 
 ```
 AWS_PROFILE=awx-deploy uv run --all-packages python scripts/deployed_security_checks.py
