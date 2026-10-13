@@ -108,6 +108,50 @@ def test_falls_back_when_primary_model_is_unavailable_before_any_tool_ran():
     assert out["model"] == rt.DEFAULT_FALLBACK_MODEL_ID
 
 
+def test_the_default_agent_sends_no_sampling_parameters():
+    # Claude Sonnet 5 rejects `temperature` with a ValidationException.
+    agent = rt._default_agent(rt.DEFAULT_MODEL_ID, DEFAULT_REGION, "k1", [], [])
+    config = agent.model.get_config()
+    assert config["model_id"] == rt.DEFAULT_MODEL_ID
+    assert not {"temperature", "top_p", "top_k"} & set(config)
+
+
+class RejectedRequest(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.response = {"Error": {"Code": code, "Message": message}}
+
+
+def test_the_fallback_warning_carries_the_error_message(caplog):
+    message = "ValidationException: temperature is deprecated for this model. " + "x" * 500
+
+    def make(model_id, region, kit, tools, messages):
+        def call(prompt):
+            if model_id == rt.DEFAULT_MODEL_ID:
+                raise RejectedRequest("ValidationException", message)
+            return "ok"
+
+        return _Callable(SimpleNamespace(messages=list(messages)), call)
+
+    with caplog.at_level("WARNING", logger=rt.log.name):
+        out = rt.run_turn(
+            kit="k1",
+            prompt="hi",
+            token=_token(),
+            session_id="s",
+            env=ENV,
+            mcp_factory=FakeMcp,
+            agent_factory=make,
+        )
+    assert out["model"] == rt.DEFAULT_FALLBACK_MODEL_ID
+    (record,) = [r for r in caplog.records if "trying fallback" in r.getMessage()]
+    text = record.getMessage()
+    assert "failed (ValidationException" in text
+    assert "temperature is deprecated for this model" in text
+    assert "unavailable" not in text
+    assert len(text) < len(message)
+
+
 def test_no_fallback_after_a_tool_ran():
     with pytest.raises(ModelError):
         rt.run_turn(

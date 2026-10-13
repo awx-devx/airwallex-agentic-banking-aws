@@ -120,8 +120,10 @@ def _default_agent(model_id: str, region: str, kit: str, tools: list[Any], messa
     from strands import Agent
     from strands.models import BedrockModel
 
+    # No sampling parameters: Claude Sonnet 5 rejects `temperature` with a ValidationException.
+    # The kits' money safety is in code (policy checks, approvals, workflows), not in sampling.
     return Agent(
-        model=BedrockModel(model_id=model_id, region_name=region, temperature=0),
+        model=BedrockModel(model_id=model_id, region_name=region),
         system_prompt=system_prompt(kit),
         tools=tools,
         messages=messages,
@@ -153,6 +155,16 @@ def _error_code(exc: BaseException) -> str | None:
                 return str(code)
         cur = cur.__cause__ or cur.__context__
     return None
+
+
+MAX_ERROR_EXCERPT = 200
+
+
+def _error_excerpt(exc: BaseException, limit: int = MAX_ERROR_EXCERPT) -> str:
+    """The start of the exception message on one line, so a rejected request (for example a
+    ValidationException naming a parameter) reads differently from an unavailable model."""
+    text = " ".join(str(exc).split())
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 MAX_TOOL_PAGES = 20  # the Gateway pages tools/list (30 per page today; 61 tools in 3 pages)
@@ -220,7 +232,12 @@ def run_turn(
                 last_exc = exc
                 code = _error_code(exc)
                 if code in _FALLBACK_CODES and not _used_tools(agent.messages[len(history) :]):
-                    log.warning("model %s unavailable (%s); trying fallback", model_id, code)
+                    log.warning(
+                        "model %s failed (%s: %s); trying fallback",
+                        model_id,
+                        code,
+                        _error_excerpt(exc),
+                    )
                     continue
                 raise
             SESSIONS.put(key, list(agent.messages))
