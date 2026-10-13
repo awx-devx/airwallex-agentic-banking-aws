@@ -42,11 +42,12 @@ class SeedError(Exception):
     """A refusal, reported as one line with no credential value in it."""
 
 
-EXPIRED = "your AWS sign-in has expired; sign in again for that profile and retry"
+EXPIRED = "your AWS sign-in has expired; sign in again for the profile you used and retry"
 INVALID = "the credentials are not valid; check --profile"
 UNREACHABLE = "cannot reach AWS in {region}; check --region"
 DENIED = (
-    "these credentials might not call {operation}; use operator credentials for the deploy account"
+    "these credentials might lack permission for {operation}; use operator credentials for the "
+    "deploy account"
 )
 # A fixed next step for each common AWS failure, by exception type or AWS error code. Only the
 # operation name and the Region are filled in.
@@ -56,6 +57,9 @@ ERROR_HINTS = {
         "and retry"
     ),
     "ProfileNotFound": "the --profile is not in your AWS config; pass a profile that exists",
+    "CredentialRetrievalError": (
+        "the profile's credential process failed; run it yourself to see why, then retry"
+    ),
     "ExpiredToken": EXPIRED,
     "ExpiredTokenException": EXPIRED,
     "TokenRetrievalError": EXPIRED,
@@ -293,8 +297,8 @@ def main(
     except (KeyboardInterrupt, EOFError):
         if uploading:
             print(
-                "\ncancelled during the upload; the secret might hold the new values. Run the "
-                "script again to be sure",
+                "\ncancelled during the upload; the secret might hold the new values; run the "
+                "script again to make sure it does",
                 file=sys.stderr,
             )
         else:

@@ -182,7 +182,7 @@ def _echo_client_error(secret_string):
         (
             _echo_client_error,
             "ClientError (AccessDeniedException) from PutSecretValue; these credentials might "
-            "not call PutSecretValue; use operator credentials for the deploy account",
+            "lack permission for PutSecretValue; use operator credentials for the deploy account",
         ),
     ],
     ids=["runtime-error", "client-error"],
@@ -209,12 +209,12 @@ def _typed(make):
     return lambda secret_string: make(f"echo {secret_string}")
 
 
-EXPIRED = "your AWS sign-in has expired; sign in again for that profile and retry"
+EXPIRED = "your AWS sign-in has expired; sign in again for the profile you used and retry"
 INVALID = "the credentials are not valid; check --profile"
 UNREACHABLE = "cannot reach AWS in us-west-2; check --region"
 DENIED = (
-    "ClientError ({code}) from PutSecretValue; these credentials might not call PutSecretValue; "
-    "use operator credentials for the deploy account"
+    "ClientError ({code}) from PutSecretValue; these credentials might lack permission for "
+    "PutSecretValue; use operator credentials for the deploy account"
 )
 CODE_LINE = "ClientError ({code}) from PutSecretValue; {hint}"
 
@@ -230,6 +230,13 @@ CODE_LINE = "ClientError ({code}) from PutSecretValue; {hint}"
         (
             _typed(lambda m: botocore_errors.ProfileNotFound(profile=m)),
             "ProfileNotFound; the --profile is not in your AWS config; pass a profile that exists",
+        ),
+        (
+            _typed(
+                lambda m: botocore_errors.CredentialRetrievalError(provider="process", error_msg=m)
+            ),
+            "CredentialRetrievalError; the profile's credential process failed; run it yourself "
+            "to see why, then retry",
         ),
         (
             _typed(lambda m: botocore_errors.TokenRetrievalError(provider="sso", error_msg=m)),
@@ -316,8 +323,8 @@ def test_an_error_from_the_stack_lookup_names_that_operation(tmp_path, capsys):
     assert _puts(session) == []
     assert capsys.readouterr().err.strip() == (
         "seed_airwallex_secret: ClientError (AccessDenied) from DescribeStacks; these "
-        "credentials might not call DescribeStacks; use operator credentials for the deploy "
-        "account"
+        "credentials might lack permission for DescribeStacks; use operator credentials for the "
+        "deploy account"
     )
 
 
@@ -326,8 +333,8 @@ def test_ctrl_c_during_the_upload_says_the_secret_might_hold_the_new_values(tmp_
     code, _ = _run(["--outputs", str(_outputs(tmp_path))], session=session)
     assert code == 130
     assert capsys.readouterr().err.strip() == (
-        "cancelled during the upload; the secret might hold the new values. Run the script "
-        "again to be sure"
+        "cancelled during the upload; the secret might hold the new values; run the script "
+        "again to make sure it does"
     )
 
 
