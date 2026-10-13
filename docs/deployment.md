@@ -91,11 +91,11 @@ fails for want of an alert address.
 
 `cdk deploy` asks a person at a terminal to approve each stack's AWS Identity and Access
 Management (IAM) changes. A shell with no terminal (a continuous integration (CI) job, a
-coding agent) cannot answer, and the deploy stops before it creates anything. There, you can
-review the IAM changes first with `cdk diff` from `infra/`, passing the same context
-`make deploy` passes: `-c account=... -c alert_email=... -c region=...`, plus `-c kits=...`,
-`-c model_id=...` and `-c fallback_model_id=...` if you set them. Then pass the CDK CLI's
-approval flag through `CDK_ARGS`:
+coding agent) cannot answer, and the deploy stops before it creates anything. In such a
+shell, you can first review the IAM changes with `cdk diff` from `infra/`. Pass it the context
+that `make deploy` passes: `-c account=... -c alert_email=... -c region=...`, plus
+`-c kits=...`, `-c model_id=...` and `-c fallback_model_id=...` if you set them. Then pass
+the CDK CLI's approval flag through `CDK_ARGS`:
 
 ```
 AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> \
@@ -118,18 +118,18 @@ file in the repository:
 
 ```
 SECRET_ARN=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["AirwallexSecretArn"])')
-read -rsp "Airwallex client ID: " AWX_CLIENT_ID; echo
-read -rsp "Airwallex API key: " AWX_API_KEY; echo
-export AWX_CLIENT_ID AWX_API_KEY
-( umask 077
-  python3 -c 'import json, os; print(json.dumps({"client_id": os.environ["AWX_CLIENT_ID"], "api_key": os.environ["AWX_API_KEY"]}))' \
-      > /tmp/awx-secret.json )
+python3 -c 'import getpass, json, os; v = {"client_id": getpass.getpass("Airwallex client ID: "), "api_key": getpass.getpass("Airwallex API key: ")}; f = os.open("/tmp/awx-secret.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(f, json.dumps(v).encode()); os.close(f)'
 aws --profile awx-deploy --region "${REGION:?set REGION first}" secretsmanager put-secret-value \
     --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
-rm /tmp/awx-secret.json; unset AWX_CLIENT_ID AWX_API_KEY
+rm /tmp/awx-secret.json
 ```
 
-The `read -rsp` prompts need a terminal. In a shell with no terminal, read the same values
+`python3` prompts for the client ID and the API key without echoing them, and writes
+`/tmp/awx-secret.json` readable by you only. The values never enter the shell's variables,
+and the prompts work the same in bash and zsh. If `/tmp/awx-secret.json` already exists,
+`python3` refuses to write it: delete it and run the block again.
+
+The prompts need a terminal. In a shell with no terminal, read the same values
 from an owner-only env file instead: the `KEY=VALUE` file with `AWX_CLIENT_ID` and
 `AWX_API_KEY` that the sandbox tests read, `~/.config/airwallex-sandbox/credentials.env` by
 default. Keep that file outside the repository and readable by you only (`chmod 600`). This
@@ -220,7 +220,8 @@ Each password goes into Secrets Manager as `awx-poc/demo-users/<username>`, a JS
 `{"username": ..., "password": ...}`. `scripts/deployed_security_checks.py` signs in from these
 secrets. The function below, `create_demo_user <username> <tenant_id> <requester|approver>`, creates
 one user without putting the password on a command line. It calls the AWS CLI through
-`awsd`, which adds the deploy profile and `REGION` and works in bash and zsh.
+`awsd`, a shell function that adds `--profile awx-deploy --region "$REGION"` and stops when
+`REGION` is unset.
 The password policy needs 14 or more characters with upper and lower case, a digit and a
 symbol:
 
@@ -407,8 +408,9 @@ action.
 `awxpoc` (package `awx_agent`) talks to the AgentCore Runtime and the approval API. It reads
 its configuration from the stack outputs file (`--config`, or the `AWXPOC_CONFIG` environment
 variable) and keeps its tokens under `~/.awxpoc`. `awxpoc chat` with no `-m` runs a prompt
-loop. After each reply it prints the model that answered to stderr, as
-`(answered by <model ID>)`, so stdout carries only the reply.
+loop. With or without `-m`, it prints the model that answered each reply to stderr, as
+`(answered by <model ID>)`, so that line stays out of stdout. stdout carries the
+`session <id>` line, the loop's `you> ` prompt and the replies.
 
 ```
 export AWXPOC_CONFIG=infra/cdk-outputs.json

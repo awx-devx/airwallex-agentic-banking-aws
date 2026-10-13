@@ -161,11 +161,10 @@ these GET paths:
 | platform | `/api/v1/charges`, `/api/v1/charges/{id}` |
 | employer | `/api/v1/balances/current`, `/api/v1/fx/rates/current`, `/api/v1/beneficiaries`, `/api/v1/transfers`, `/api/v1/transfers/{id}`, `/api/v1/fx/conversions`, `/api/v1/fx/conversions/{id}`, `/api/v1/financial_transactions` |
 
-To synth or deploy only this kit, with `REGION` set to `us-west-2` or the Region of the
-deployment being updated:
+To synth or deploy only this kit, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-export REGION=us-west-2
 make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k6 REGION="$REGION"
 make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k6 REGION="$REGION"
 ```

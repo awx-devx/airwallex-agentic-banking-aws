@@ -77,7 +77,7 @@ require-account:
 # REGION_CODE, OTHER_PARTITION_PREFIXES, REGION_CODE_MESSAGE and OTHER_PARTITION_MESSAGE in
 # packages/awx_common/src/awx_common/regions.py (a test pins them together).
 REGION_CODE := ^[a-z]{2}(-[a-z]+)+-[0-9]+$$
-OTHER_PARTITION_PREFIXES := cn- us-gov- us-iso- us-isob- eu-isoe-
+OTHER_PARTITION_PREFIXES := cn- us-gov- us-iso- us-isob- us-isof- eu-isoe-
 # $(value REGION) is the text the caller passed, unexpanded, so make runs no $(...) in it.
 REGION_VALUE = $(strip $(value REGION))
 REGION_CODE_MESSAGE = REGION=$(REGION_VALUE) is not an AWS Region code such as us-west-2

@@ -132,11 +132,10 @@ target `k1`. `AwxSpine` adds the kit 1 reader, which may call only these GET pat
 `/api/v1/balances/current`, `/api/v1/fx/rates/current`, `/api/v1/fx/conversions`,
 `/api/v1/fx/conversions/{id}`, `/api/v1/transfers` and `/api/v1/transfers/{id}`.
 
-To synthesise or deploy only this kit, with `REGION` set to `us-west-2` or the Region of the
-deployment being updated:
+To synthesise or deploy only this kit, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-export REGION=us-west-2
 make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k1 REGION="$REGION"
 make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k1 REGION="$REGION"
 ```

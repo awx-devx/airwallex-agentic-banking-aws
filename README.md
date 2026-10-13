@@ -104,7 +104,9 @@ docs/              repository documentation and architecture diagrams
 ## Getting started
 
 Prerequisites: Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js for the AWS Cloud
-Development Kit (CDK) command line, which the Makefile runs through `npx`.
+Development Kit (CDK) command line, which the Makefile runs through `npx`. Set `REGION` in
+the shell before `make synth` (`export REGION=us-west-2`, or the Region of the deployment
+being updated):
 
 ```sh
 make help
@@ -112,13 +114,13 @@ make sync
 make hooks
 make check
 make synth-test
-export REGION=us-west-2
 make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com REGION="$REGION"
 ```
 
-`make help` lists every target. `make sync` creates the uv workspace environment, and
-`make hooks` runs the secret scan on every commit (`git config core.hooksPath .githooks`).
-`make check` runs the lint, the secret scan and the offline tests (no network once synced).
+`make help` lists every target. `make sync` creates the uv workspace environment.
+`make hooks` sets `git config core.hooksPath .githooks`, so git runs the secret scan on every
+commit. `make check` runs the linters, the secret scan and the offline tests (no network once
+synced).
 `make synth-test` runs cdk synth and the synth-time security tests, and `make synth`
 synthesises every stack for `REGION`.
 
@@ -130,14 +132,15 @@ layers.
 
 ## Deploying
 
+Set `REGION` in the shell first: `export REGION=us-west-2` for a new deployment, or the Region
+an existing deployment was deployed to, to update it.
+
 ```sh
-export REGION=us-west-2
 make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"
 make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"
 ```
 
-To update an existing deployment, set `REGION` to the Region it was deployed to.
-`make bootstrap` runs once per account and Region, and `make deploy` deploys every stack.
+Run `make bootstrap` once per account and Region. `make deploy` deploys every stack.
 
 `cdk deploy` asks a person at a terminal to approve AWS Identity and Access Management (IAM)
 changes. In a shell with no terminal

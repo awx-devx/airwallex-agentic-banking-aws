@@ -301,7 +301,7 @@ def main(
                 if "error" in reply:
                     raise CliError(f"{reply['error'].get('code')}: {reply['error'].get('message')}")
                 print(reply.get("reply", ""), file=out)
-                # The model that answered goes to stderr, so stdout carries the reply alone.
+                # The model that answered goes to stderr, keeping it out of the reply on stdout.
                 print(f"(answered by {reply.get('model') or 'an unknown model'})", file=err)
             return 0
         if args.command == "proposals":

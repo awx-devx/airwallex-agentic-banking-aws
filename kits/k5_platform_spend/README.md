@@ -139,11 +139,10 @@ call these GET paths:
 | platform (no header) | `/api/v1/balances/current`, `/api/v1/connected_account_transfers[/<id>]`, `/api/v1/charges[/<id>]` |
 | tenant (`x-on-behalf-of`) | `/api/v1/balances/current`, `/api/v1/issuing/cardholders[/<id>]`, `/api/v1/issuing/cards[/<id>]`, `/api/v1/issuing/transactions` |
 
-Synth or deploy only this kit, with `REGION` set to `us-west-2` or the Region of the
-deployment being updated:
+Synth or deploy only this kit, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-export REGION=us-west-2
 make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k5 REGION="$REGION"
 ```
 

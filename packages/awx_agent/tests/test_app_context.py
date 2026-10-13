@@ -45,6 +45,7 @@ def test_a_value_that_is_not_a_region_code_is_refused(value):
         "us-gov-west-1",
         "us-iso-east-1",
         "us-isob-east-1",
+        "us-isof-south-1",
         "eu-isoe-west-1",
     ],
 )

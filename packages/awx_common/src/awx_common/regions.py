@@ -21,9 +21,9 @@ REGION_CODE = r"^[a-z]{2}(-[a-z]+)+-[0-9]+$"
 REGION_CODE_MESSAGE = "REGION={region} is not an AWS Region code such as us-west-2"
 
 # Region code prefixes of the partitions other than the commercial `aws` partition (China,
-# AWS GovCloud (US) and the isolated Regions). Their ARNs use another partition name, which
-# the stacks' ARNs do not.
-OTHER_PARTITION_PREFIXES = ("cn-", "us-gov-", "us-iso-", "us-isob-", "eu-isoe-")
+# AWS GovCloud (US) and the isolated Regions). Their Amazon Resource Names (ARNs) use another
+# partition name, and the stacks build every ARN with `aws`.
+OTHER_PARTITION_PREFIXES = ("cn-", "us-gov-", "us-iso-", "us-isob-", "us-isof-", "eu-isoe-")
 OTHER_PARTITION_MESSAGE = (
     "REGION={region} is not in the commercial AWS partition (aws). "
     "This app supports only that partition"

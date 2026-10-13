@@ -143,8 +143,9 @@ def test_makefile_region_checks_are_the_python_ones():
         ("US-WEST-2", REGION_CODE_MESSAGE.format(region="US-WEST-2")),
         ("zz test", REGION_CODE_MESSAGE.format(region="zz test")),
         ("us-gov-west-1", OTHER_PARTITION_MESSAGE.format(region="us-gov-west-1")),
+        ("us-isof-south-1", OTHER_PARTITION_MESSAGE.format(region="us-isof-south-1")),
     ],
-    ids=["empty", "whitespace", "upper-case", "not-a-code", "other-partition"],
+    ids=["empty", "whitespace", "upper-case", "not-a-code", "other-partition", "iso-f"],
 )
 def test_an_empty_region_is_refused_before_cdk_runs(target, region, message):
     # `REGION=$REGION` with REGION unset in the shell passes an empty value, which overrides
@@ -296,7 +297,54 @@ def test_a_sandbox_run_without_fixture_ids_ends_with_the_skip_line():
     assert "CONTRACT SUITE SKIPPED: all" in lines[-2]
 
 
-MAKE_REGION_TARGET = re.compile(r"\bmake\s+(bootstrap|synth|deploy)(?![\w-])")
+# `make`, then any words of the same command, then a target that needs REGION.
+MAKE_REGION_TARGET = re.compile(r"\bmake\b(?:\s+[^\s;&|]+)*?\s+(bootstrap|synth|deploy)(?![\w-])")
+REGION_ARGUMENT = re.compile(r"(^|\s)REGION=")
+
+
+def _load_markdown_blocks():
+    spec = importlib.util.spec_from_file_location(
+        "_awx_markdown_blocks", CONTRACT_DIR / "markdown_blocks.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _make_lines_without_region(text: str) -> list[str]:
+    # Commands sit in fenced code blocks; prose that names a target is not a command.
+    lines = text.splitlines()
+    missing = []
+    for number, _, _, line in _load_markdown_blocks().code_lines(text):
+        if not MAKE_REGION_TARGET.search(line):
+            continue
+        # A command continued with a trailing backslash counts as one line.
+        command, rest = line, number
+        while command.rstrip().endswith("\\") and rest < len(lines):
+            command += " " + lines[rest]
+            rest += 1
+        if not REGION_ARGUMENT.search(command):
+            missing.append(f"{number}: {line.strip()}")
+    return missing
+
+
+@pytest.mark.parametrize(
+    ("block", "caught"),
+    [
+        ('```\nmake deploy ACCOUNT=1 REGION="$REGION"\n```\n', False),
+        ("```\nmake ACCOUNT=111122223333 deploy\n```\n", True),
+        ("```\nAWS_REGION=us-west-2 make deploy ACCOUNT=1\n```\n", True),
+        ("```\nmake deploy ACCOUNT=1 AWS_REGION=us-west-2\n```\n", True),
+        ('```\nmake deploy ACCOUNT=1 \\\n    REGION="$REGION"\n```\n', False),
+        ("```\nuv run make synth ACCOUNT=1\n```\n", True),
+        ("~~~sh\nmake bootstrap ACCOUNT=1\n~~~\n", True),
+        ("```\nmake synth-test\n```\n", False),
+        ("```\nmake check && cdk deploy\n```\n", False),
+        ("Run make deploy ACCOUNT=1 after that.\n", False),
+    ],
+)
+def test_the_region_check_finds_the_target_anywhere_in_a_make_command(block, caught):
+    assert bool(_make_lines_without_region(block)) is caught
 
 
 def test_every_documented_make_bootstrap_synth_and_deploy_passes_region():
@@ -310,22 +358,9 @@ def test_every_documented_make_bootstrap_synth_and_deploy_passes_region():
         check=True,
     ).stdout.split()
     assert tracked
-    missing = []
-    for name in tracked:
-        lines = (REPO / name).read_text().splitlines()
-        in_code = False
-        for number, line in enumerate(lines, 1):
-            if line.lstrip().startswith("```"):
-                in_code = not in_code
-                continue
-            # Commands sit in fenced code blocks; prose that names a target is not a command.
-            if not in_code or not MAKE_REGION_TARGET.search(line):
-                continue
-            # A command continued with a trailing backslash counts as one line.
-            command, rest = line, number
-            while command.rstrip().endswith("\\") and rest < len(lines):
-                command += " " + lines[rest]
-                rest += 1
-            if "REGION=" not in command:
-                missing.append(f"{name}:{number}: {line.strip()}")
+    missing = [
+        f"{name}:{hit}"
+        for name in tracked
+        for hit in _make_lines_without_region((REPO / name).read_text())
+    ]
     assert not missing, "make lines without REGION=:\n" + "\n".join(missing)

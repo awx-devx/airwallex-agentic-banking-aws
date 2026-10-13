@@ -136,11 +136,10 @@ reader `ReaderK3Fn`, which may call only `GET /api/v1/transfers`,
 `POST /api/v1/transfers/create` and `POST /api/v1/simulation/transfers/{id}/transition`,
 sent by the spine's mutation adapter.
 
-Synth or deploy only this kit, with `REGION` set to `us-west-2` or the Region of the
-deployment being updated:
+Synth or deploy only this kit, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-export REGION=us-west-2
 make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k3 REGION="$REGION"
 make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k3 REGION="$REGION"
 ```

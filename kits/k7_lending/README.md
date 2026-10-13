@@ -141,11 +141,10 @@ these GET paths:
 | borrower (with `x-on-behalf-of`) | `balances/current`, `balances/history`, `charges`, `charges/{id}`, `connected_account_transfers`, `connected_account_transfers/{id}` |
 | platform (headerless) | `balances/current`, `charges`, `charges/{id}`, `connected_account_transfers`, `connected_account_transfers/{id}` |
 
-Synth or deploy only this kit, with `REGION` set to `us-west-2` or the Region of the
-deployment being updated:
+Synth or deploy only this kit, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-export REGION=us-west-2
 make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k7 REGION="$REGION"
 make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k7 REGION="$REGION"
 ```

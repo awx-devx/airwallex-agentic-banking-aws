@@ -138,11 +138,10 @@ kit 2 reader Lambda, which may call only these GET paths:
 /api/v1/issuing/transactions
 ```
 
-Synth or deploy only this kit (synth needs no credentials), with `REGION` set to `us-west-2`
-or the Region of the deployment being updated:
+Synth or deploy only this kit (synth needs no credentials), with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-export REGION=us-west-2
 make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k2 REGION="$REGION"
 make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k2 REGION="$REGION"
 ```

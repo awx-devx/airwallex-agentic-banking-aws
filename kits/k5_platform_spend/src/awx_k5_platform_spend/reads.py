@@ -103,9 +103,9 @@ def read_bridge_position(raw: Mapping[str, Any], ctx: PolicyContext) -> Mapping[
     """This tenant's own bridge position only: no platform capital, headroom, floor or other
     tenant's figures (they would reach the tenant caller), and no account identifiers.
 
-    Each queued shortfall carries its obligation's `due_on` from the caller's own obligation in
-    the current setup, or None when the setup has no such obligation for the caller, so the
-    agent can state a due date only when the kit holds one."""
+    Each queued shortfall carries `due_on`, the due date of the caller's own obligation in the
+    current setup. It is None when the setup has no such obligation for the caller, so the
+    agent states a due date only when the kit holds one."""
     from .book import queue_key
     from .workflow import book_for, current_setup
 

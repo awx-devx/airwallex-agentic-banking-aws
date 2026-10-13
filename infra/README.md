@@ -47,16 +47,20 @@ tests do). See `awx_agent.staging`.
 
 ## Synth and deploy
 
-From the repository root:
+From the repository root, with `REGION` set in the shell (`export REGION=us-west-2`, or the
+Region of the deployment being updated):
 
 ```
 make sync
 make check
 make synth-test
-make synth  ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [REGION=...] [KITS=k1,k4]
-make bootstrap ACCOUNT=<12-digit id> [REGION=...]
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [REGION=...] [KITS=k1,k4] [CDK_ARGS=...]
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com REGION="$REGION"
+make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"
 ```
+
+`make synth` and `make deploy` also take `KITS=k1,k4`, `MODEL_ID`, `FALLBACK_MODEL_ID` and
+`CDK_ARGS`.
 
 `make bootstrap` runs `cdk bootstrap aws://<12-digit id>/<REGION>` once per account and Region
 from the repository root, where no `cdk.json` loads the app, so it needs no alert address.
