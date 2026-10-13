@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from awx_common.regions import DEFAULT_REGION
 
 pytestmark = pytest.mark.synth
 
@@ -88,8 +89,9 @@ def test_runtime_is_code_deployed_with_cognito_jwt_and_authorization_header(synt
     assert jwt["AllowedClients"]
     assert props["RequestHeaderConfiguration"]["RequestHeaderAllowlist"] == ["Authorization"]
     envv = props["EnvironmentVariables"]
-    assert envv["AWX_MODEL_ID"] == "au.anthropic.claude-sonnet-5"
-    assert envv["AWX_FALLBACK_MODEL_ID"] == "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    assert envv["AWX_MODEL_ID"] == "us.anthropic.claude-sonnet-5"
+    assert envv["AWX_FALLBACK_MODEL_ID"] == "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    assert envv["AWX_REGION"] == DEFAULT_REGION
 
 
 def test_gateway_uses_cognito_and_identity_interceptor(synth):
@@ -231,7 +233,7 @@ def test_tool_lambda_verifies_tokens_of_the_spine_agent_client(synth):
     (fn,) = fns
     env = fn["Properties"]["Environment"]["Variables"]
     assert "AgentClient" in json.dumps(env["AWX_EXPECTED_CLIENT_ID"])
-    assert "cognito-idp.ap-southeast-2.amazonaws.com" in json.dumps(env["AWX_EXPECTED_ISSUER"])
+    assert f"cognito-idp.{DEFAULT_REGION}.amazonaws.com" in json.dumps(env["AWX_EXPECTED_ISSUER"])
     for var in ("AWX_LEDGER_TABLE", "AWX_TENANTS_TABLE", "AWX_READER_FN", "AWX_STATE_MACHINES"):
         assert var in env
 

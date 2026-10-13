@@ -55,9 +55,9 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_collect_weekly_repayment",
         ToolKind.PROPOSE,
-        "Collect one borrower's repayment for its next uncollected ISO week, once that week "
-        "has ended. Code sizes the charge; a short wallet becomes arrears. Weeks run in "
-        "order from the first full week after funding, each once. Needs a person's approval.",
+        "Propose collecting one borrower's repayment for its next uncollected ISO week. Code "
+        "checks the week, sizes the charge, and turns a short wallet into arrears. Weeks run in "
+        "order from the first full week after funding, each once.",
         _obj(loan_id=_LOAN_ID, week=_WEEK),
     ),
     ToolSpec(
@@ -68,8 +68,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         "their own loan ids instead of asking. The "
         "borrower cannot choose the amount. Code sizes the tranche from the loan's remaining "
         "commitment and the platform's lending capacity (full, partial or delayed), whatever "
-        "amount the borrower asked for; say so instead of giving another reason. A person "
-        "must approve it.",
+        "amount the borrower asked for; say so instead of giving another reason.",
         _obj(loan_id=_LOAN_ID),
     ),
     ToolSpec(

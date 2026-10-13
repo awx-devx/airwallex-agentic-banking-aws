@@ -130,9 +130,12 @@ money-moving tool is called); see [docs/deployment.md](../../docs/deployment.md)
    arguments.
 3. A direct invoke is useless: `aws lambda invoke` on a tool Lambda with a forged
    `client_context` and a self-made `_awx_caller` returns NOT_AUTHORISED.
-4. The model ID `au.anthropic.claude-sonnet-5` resolves. The Runtime role's foundation-model
-   resource ends in a wildcard for the dated ID behind the geo profile
-   (`infra/constructs/agentcore_runtime.py`); narrow it once that ID is known.
+4. The model ID in the Runtime's `AWX_MODEL_ID` (for example `us.anthropic.claude-sonnet-5`)
+   resolves in the deploy Region. The Runtime role's foundation-model resource ends in a
+   wildcard for the dated ID behind the geographic inference profile. Its
+   `bedrock:InferenceProfileArn` condition allows the model only through the role's own
+   profiles (`infra/constructs/agentcore_runtime.py`). Narrow the wildcard once that ID is
+   known.
 5. Execution idempotency: the same propose call twice yields one execution.
 6. Gateway KMS use: CloudTrail shows which principal and encryption context the Gateway's KMS
    calls carry, which decides whether to scope the role's grant with
@@ -144,8 +147,10 @@ Run from the repository root (see [docs/testing.md](../../docs/testing.md)):
 
 ```bash
 uv run --all-packages pytest packages/awx_agent/tests -m "not sandbox and not synth and not live"
-uv run --all-packages pytest packages/awx_agent/tests -m synth   # cdk synth; slow
+uv run --all-packages pytest packages/awx_agent/tests -m synth
 ```
+
+The `-m synth` run synthesises the stacks with the CDK and is slow.
 
 | Topic | Files | Marker |
 |---|---|---|

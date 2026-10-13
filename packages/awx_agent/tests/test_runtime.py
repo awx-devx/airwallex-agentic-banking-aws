@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 from awx_agent.runtime import app as rt
+from awx_common.regions import DEFAULT_REGION
 
-ENV = {"AWX_GATEWAY_URL": "https://gw.example/mcp", "AWX_REGION": "ap-southeast-2"}
+ENV = {"AWX_GATEWAY_URL": "https://gw.example/mcp", "AWX_REGION": DEFAULT_REGION}
 
 
 def _token(sub="user-1"):
@@ -105,6 +106,57 @@ def test_falls_back_when_primary_model_is_unavailable_before_any_tool_ran():
     )
     assert log == [rt.DEFAULT_MODEL_ID, rt.DEFAULT_FALLBACK_MODEL_ID]
     assert out["model"] == rt.DEFAULT_FALLBACK_MODEL_ID
+
+
+def test_the_default_agent_sends_no_sampling_parameters():
+    # Claude Sonnet 5 rejects `temperature` with a ValidationException.
+    agent = rt._default_agent(rt.DEFAULT_MODEL_ID, DEFAULT_REGION, "k1", [], [])
+    config = agent.model.get_config()
+    assert config["model_id"] == rt.DEFAULT_MODEL_ID
+    assert not {"temperature", "top_p", "top_k"} & set(config)
+    # Check the request Strands builds, not only the config. BedrockModel.format_request is a
+    # Strands internal outside its documented API, pinned by uv.lock (strands-agents 1.58.0),
+    # so a Strands upgrade that changes the request shape fails this test.
+    request = agent.model.format_request([{"role": "user", "content": [{"text": "hi"}]}])
+    assert request["modelId"] == rt.DEFAULT_MODEL_ID
+    assert request["inferenceConfig"] == {}
+    assert "additionalModelRequestFields" not in request
+
+
+class RejectedRequest(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.response = {"Error": {"Code": code, "Message": message}}
+
+
+def test_the_fallback_warning_carries_the_error_message(caplog):
+    message = "ValidationException: temperature is deprecated for this model. " + "x" * 500
+
+    def make(model_id, region, kit, tools, messages):
+        def call(prompt):
+            if model_id == rt.DEFAULT_MODEL_ID:
+                raise RejectedRequest("ValidationException", message)
+            return "ok"
+
+        return _Callable(SimpleNamespace(messages=list(messages)), call)
+
+    with caplog.at_level("WARNING", logger=rt.log.name):
+        out = rt.run_turn(
+            kit="k1",
+            prompt="hi",
+            token=_token(),
+            session_id="s",
+            env=ENV,
+            mcp_factory=FakeMcp,
+            agent_factory=make,
+        )
+    assert out["model"] == rt.DEFAULT_FALLBACK_MODEL_ID
+    (record,) = [r for r in caplog.records if "trying fallback" in r.getMessage()]
+    text = record.getMessage()
+    assert "failed (ValidationException" in text
+    assert "temperature is deprecated for this model" in text
+    assert "unavailable" not in text
+    assert len(text) < len(message)
 
 
 def test_no_fallback_after_a_tool_ran():
@@ -248,9 +300,9 @@ def test_the_page_loop_is_bounded_and_fails_closed():
 def test_the_prompt_forbids_quoting_values_no_tool_returned():
     from awx_agent.runtime.prompt import system_prompt
 
-    p = system_prompt("k7")
-    assert "that a tool returned in this conversation" in p
-    assert "I could not reach the tools" in p
+    p = " ".join(system_prompt("k7").split())
+    assert "when a tool returned it in this conversation" in p
+    assert "say plainly that you could not reach the tools, and invent nothing" in p
 
 
 def test_the_prompt_says_an_auto_run_has_started():
@@ -270,17 +322,18 @@ def test_the_prompt_says_an_auto_run_has_started():
     assert "A proposal moves no money" not in flat
 
 
-def test_the_prompt_reads_a_status_before_stating_it():
+def test_the_prompt_sends_the_user_to_the_cli_for_a_status():
     from awx_agent.runtime.prompt import system_prompt
 
     flat = " ".join(system_prompt("k2").split())
-    assert "Before you tell the user a proposal's current status" in flat
-    assert "read it with a read_* tool in this turn" in flat
+    assert "No read_* tool returns it, so never offer to check it." in flat
+    # The rule applies when the user asks, so a reply right after a propose is not told to
+    # say it has not checked the status the tool just returned.
+    assert "When the user asks for a proposal's current status, say you have not checked" in flat
     # A propose_* retry is the only tool output carrying a status; it can start a second run.
     assert "Never call a propose_* tool to check a status" in flat
     assert (
-        "If no read tool returns the status, say you have not checked it and tell the user to "
-        "run `awxpoc proposals show <proposal_id>`." in flat
+        "say you have not checked it and give them `awxpoc proposals show <proposal_id>`." in flat
     )
 
 

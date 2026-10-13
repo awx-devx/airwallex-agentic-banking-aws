@@ -6,20 +6,51 @@ create demo users, load each kit's state, then use the agent. The AWS Cloud Deve
 [infra/README.md](../infra/README.md).
 
 Every command runs from the repository root unless it says otherwise. Examples use
-`--profile awx-deploy`. Replace it with your own profile. The deployment targets
-`ap-southeast-2`: `make deploy` has no Region variable, and the model grants and
-`scripts/deployed_security_checks.py` assume that Region.
+`--profile awx-deploy`. Replace it with your own profile.
+
+## Region and models
+
+The AWS Region is a deploy-time choice. The `make` targets read these variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REGION` | `us-west-2` | The AWS Region to bootstrap and deploy to (CDK context `region`). |
+| `MODEL_ID` | the primary inference profile of `REGION` | The agent's model or inference profile ID (CDK context `model_id`). |
+| `FALLBACK_MODEL_ID` | the fallback inference profile of `REGION` | The model the agent falls back to when the primary is unavailable (CDK context `fallback_model_id`). |
+
+The default Region and the Region table are defined once, in
+`packages/awx_common/src/awx_common/regions.py`. The agent's models are Claude Sonnet 5
+(primary) and Claude Sonnet 4.5 (fallback), called through the geographic cross-Region
+inference profile of the deploy Region:
+
+| Deploy Region | Primary model ID | Fallback model ID |
+|---|---|---|
+| `us-east-1`, `us-east-2`, `us-west-1`, `us-west-2`, `ca-central-1` | `us.anthropic.claude-sonnet-5` | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| `eu-central-1`, `eu-north-1`, `eu-west-1`, `eu-west-2`, `eu-west-3` | `eu.anthropic.claude-sonnet-5` | `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| `ap-southeast-2` | `au.anthropic.claude-sonnet-5` | `au.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+
+Any other Region that offers Amazon Bedrock AgentCore needs `MODEL_ID` and
+`FALLBACK_MODEL_ID` set to model or inference profile IDs that Region offers. Without them,
+synth fails with a message that names the variables. The Runtime role can invoke its
+inference profiles in the deploy Region. It can invoke the foundation models behind them in
+any Region, but only through those profiles, so the grant lists no destination Regions. A
+plain foundation-model ID (with no profile prefix) is granted in the deploy Region only.
+
+Pass the same `REGION` to every command for a deployment. A `make` run with no `REGION`
+deploys to `us-west-2`, so an existing deployment in another Region is updated only by
+passing the Region it was deployed to (`REGION=ap-southeast-2` for a deployment there). A run
+with a different `REGION` deploys a separate copy; copies in different Regions of the same
+account do not clash. The `make bootstrap` and `make deploy` lines and the `aws` commands in
+this runbook read `REGION` from the shell. The `make` lines pass `REGION="$REGION"`, which
+is an empty value when the shell has no `REGION` set, and `make` refuses an empty `REGION`.
+This is why "Bootstrap and deploy" starts by setting it.
 
 ## Prerequisites
 
-- An AWS account and operator credentials with administrator access to it in `ap-southeast-2`.
-- Amazon Bedrock model access, in that Region, to the agent's model and its fallback. The model
-  IDs are set in `packages/awx_agent/src/awx_agent/runtime/app.py` and granted in
-  `infra/constructs/agentcore_runtime.py`: the Australian cross-Region inference profiles
-  `au.anthropic.claude-sonnet-5` (primary) and `au.anthropic.claude-sonnet-4-5-20250929-v1:0`
-  (fallback). These profiles route to `ap-southeast-2` and `ap-southeast-4`. Another Region
-  needs other model IDs and a change to `AU_INFERENCE_REGIONS` in
-  `infra/constructs/agentcore_runtime.py`.
+- An AWS account and operator credentials with administrator access to it in the deploy
+  Region.
+- Amazon Bedrock model access, in that Region, to the agent's model and its fallback (see
+  "Region and models").
 - Amazon Bedrock AgentCore (Runtime and Gateway) available in the Region.
 - An Airwallex sandbox account and its API credentials (a client ID and an API key). Kits 5 to
   8 also need connected accounts and platform payments enabled on that sandbox account.
@@ -28,6 +59,15 @@ Every command runs from the repository root unless it says otherwise. Examples u
 - The AWS CLI v2, for the commands below.
 
 ## Bootstrap and deploy
+
+Set the Region first: `us-west-2`, or the Region of the deployment being updated. A new
+shell needs it set again:
+
+```
+export REGION=us-west-2
+```
+
+Then build and test:
 
 ```
 make sync
@@ -40,23 +80,26 @@ in [infra/README.md](../infra/README.md)). Each takes about 4 to 5 minutes, and 
 only dots while it runs. Then bootstrap the account and Region once, and deploy every stack:
 
 ```
-AWS_PROFILE=awx-deploy make bootstrap ACCOUNT=<12-digit id>
-AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>
+AWS_PROFILE=awx-deploy make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"
+AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"
 ```
 
-`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/ap-southeast-2` from the repository
-root. It needs no alert address: the root has no `cdk.json`, so the CDK CLI does not load the
-app. Bootstrapping from `infra/` loads the app, which then fails for want of an alert address.
+`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/<region>` from the repository
+root, once per account and Region. It needs no alert address: the root has no `cdk.json`, so
+the CDK CLI does not load the app. Bootstrapping from `infra/` loads the app, which then
+fails for want of an alert address.
 
 `cdk deploy` asks a person at a terminal to approve each stack's AWS Identity and Access
 Management (IAM) changes. A shell with no terminal (a continuous integration (CI) job, a
-coding agent) cannot answer, and the deploy stops before it creates anything. There, review the IAM changes first if you need to
-(`cdk diff` from `infra/`, with the same `-c account=... -c alert_email=...` context), then
-pass the CDK CLI's approval flag through `CDK_ARGS`:
+coding agent) cannot answer, and the deploy stops before it creates anything. In such a
+shell, you can first review the IAM changes with `cdk diff` from `infra/`. Pass it the context
+that `make deploy` passes: `-c account=... -c alert_email=... -c region=...`, plus
+`-c kits=...`, `-c model_id=...` and `-c fallback_model_id=...` if you set them. Then pass
+the CDK CLI's approval flag through `CDK_ARGS`:
 
 ```
 AWS_PROFILE=awx-deploy make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> \
-    CDK_ARGS="--require-approval never"
+    REGION="$REGION" CDK_ARGS="--require-approval never"
 ```
 
 A full deploy of every stack took about 17 minutes on 8 Oct 2026.
@@ -69,48 +112,28 @@ actual and 100 percent forecast) emails the same address directly.
 
 ## Seed the Airwallex secret
 
-The spine creates the Airwallex secret empty. Put the sandbox credentials into it as a JSON
-object with `client_id` and `api_key`, out of band, and never commit them or write them to a
-file in the repository:
+The spine creates the Airwallex secret empty. Put the sandbox credentials into it out of band,
+and never commit them or write them to a file in the repository:
 
 ```
-SECRET_ARN=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["AirwallexSecretArn"])')
-read -rsp "Airwallex client ID: " AWX_CLIENT_ID; echo
-read -rsp "Airwallex API key: " AWX_API_KEY; echo
-export AWX_CLIENT_ID AWX_API_KEY
-( umask 077
-  python3 -c 'import json, os; print(json.dumps({"client_id": os.environ["AWX_CLIENT_ID"], "api_key": os.environ["AWX_API_KEY"]}))' \
-      > /tmp/awx-secret.json )
-aws --profile awx-deploy --region ap-southeast-2 secretsmanager put-secret-value \
-    --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
-rm /tmp/awx-secret.json; unset AWX_CLIENT_ID AWX_API_KEY
+uv run --all-packages python scripts/seed_airwallex_secret.py --profile awx-deploy --region "${REGION:?set REGION first}"
 ```
 
-The `read -rsp` prompts need a terminal. In a shell with no terminal, read the same values
-from an owner-only env file instead: the `KEY=VALUE` file with `AWX_CLIENT_ID` and
-`AWX_API_KEY` that the sandbox tests read, `~/.config/airwallex-sandbox/credentials.env` by
-default. Keep that file outside the repository and readable by you only (`chmod 600`). This
-keeps the values off every command line and out of shell history:
+The script prompts for the client ID and the API key without echoing them, and refuses an
+empty value. It passes a JSON object holding `client_id` and `api_key` straight to Secrets
+Manager `PutSecretValue`. No value is written to a file, put on a command line or printed.
+Ctrl-C at a prompt uploads nothing. The script finds the secret's Amazon Resource Name (ARN) in
+`infra/cdk-outputs.json` when that ARN is in the Region that `--region` names. `make deploy`
+writes the file once the whole deploy has finished. Before then, or when the file belongs to a
+deployment in another Region, the script reads the ARN from the spine stack's outputs in the
+Region that `--region` names. You can seed the secret while the later stacks still deploy.
+`--secret-id <ARN>` names the secret directly.
+
+The prompts need a terminal. In a shell with no terminal, put `AWX_CLIENT_ID` and `AWX_API_KEY`
+in the environment, for example from your CI system's secret store, and pass `--from-env`:
 
 ```
-SECRET_ARN=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["AirwallexSecretArn"])')
-( umask 077
-  uv run --all-packages python -c 'import json; from awx_spine import EnvFileCredentials; c = EnvFileCredentials().get(); print(json.dumps({"client_id": c.client_id, "api_key": c.api_key}))' \
-      > /tmp/awx-secret.json )
-aws --profile awx-deploy --region ap-southeast-2 secretsmanager put-secret-value \
-    --secret-id "$SECRET_ARN" --secret-string file:///tmp/awx-secret.json
-rm /tmp/awx-secret.json
-```
-
-To read another file, pass its path: `EnvFileCredentials(Path("<file>"))`, with
-`from pathlib import Path`. The secret's Amazon Resource Name (ARN) reaches
-`infra/cdk-outputs.json` only once the whole deploy has finished. To seed the secret while
-the later stacks still deploy, read it from the spine stack's outputs instead:
-
-```
-SECRET_ARN=$(aws --profile awx-deploy --region ap-southeast-2 cloudformation describe-stacks \
-    --stack-name AwxSpine --query "Stacks[0].Outputs[?OutputKey=='AirwallexSecretArn'].OutputValue" \
-    --output text)
+uv run --all-packages python scripts/seed_airwallex_secret.py --profile awx-deploy --region "${REGION:?set REGION first}" --from-env
 ```
 
 Of the deployed roles, only the per-kit readers and the mutation adapter can read this secret.
@@ -175,16 +198,22 @@ through the table (kit 6 payroll, kit 7 reconciliation), so `deploy/k6.yaml` and
 
 Each password goes into Secrets Manager as `awx-poc/demo-users/<username>`, a JSON object
 `{"username": ..., "password": ...}`. `scripts/deployed_security_checks.py` signs in from these
-secrets. The function below creates one user without putting the password on a command line.
+secrets. The function below, `create_demo_user <username> <tenant_id> <requester|approver>`, creates
+one user without putting the password on a command line. It calls the AWS CLI through
+`awsd`, a shell function that adds `--profile awx-deploy --region "$REGION"` and stops when
+`REGION` is unset.
 The password policy needs 14 or more characters with upper and lower case, a digit and a
 symbol:
 
 ```
 POOL=$(python3 -c 'import json; print(json.load(open("infra/cdk-outputs.json"))["AwxSpine"]["UserPoolId"])')
-AWS="aws --profile awx-deploy --region ap-southeast-2"
+awsd() {
+  aws --profile awx-deploy --region "${REGION:?set REGION first, for example: export REGION=us-west-2}" "$@"
+}
 
-create_demo_user() {  # create_demo_user <username> <tenant_id> <requester|approver>
+create_demo_user() {
   local name=$1 tenant=$2 group=$3
+  [ -n "${REGION:-}" ] || { echo "set REGION first, for example: export REGION=us-west-2" >&2; return 1; }
   ( umask 077
     python3 - "$POOL" "$name" <<'EOF'
 import json, secrets, sys
@@ -195,12 +224,12 @@ json.dump({"UserPoolId": pool, "Username": name, "Password": password, "Permanen
           open("/tmp/awx-user-password.json", "w"))
 EOF
   )
-  $AWS secretsmanager create-secret --name "awx-poc/demo-users/$name" \
+  awsd secretsmanager create-secret --name "awx-poc/demo-users/$name" \
       --secret-string file:///tmp/awx-user-secret.json
-  $AWS cognito-idp admin-create-user --user-pool-id "$POOL" --username "$name" \
+  awsd cognito-idp admin-create-user --user-pool-id "$POOL" --username "$name" \
       --message-action SUPPRESS --user-attributes Name=custom:tenant_id,Value="$tenant"
-  $AWS cognito-idp admin-set-user-password --cli-input-json file:///tmp/awx-user-password.json
-  $AWS cognito-idp admin-add-user-to-group --user-pool-id "$POOL" --username "$name" \
+  awsd cognito-idp admin-set-user-password --cli-input-json file:///tmp/awx-user-password.json
+  awsd cognito-idp admin-add-user-to-group --user-pool-id "$POOL" --username "$name" \
       --group-name "$group"
   rm -f /tmp/awx-user-secret.json /tmp/awx-user-password.json
 }
@@ -234,7 +263,7 @@ feeds) reaches it only through `awx-deploy`, the operator CLI in
 reads the `AwxSpine` stack for the tenants table, ledger table and secret, and finds state
 machines by their fixed `awx-<kit>-<action>` names. Nothing it does moves money.
 
-```
+```text
 awx-deploy [--profile P] [--region R] tenants put <file> [--replace] [--var NAME=VALUE ...]
 awx-deploy [--profile P] [--region R] run <kit> <command> <args.json> [--var NAME=VALUE ...]
 awx-deploy plan  <deploy-file> [--var NAME=VALUE ...] [--vars vars.yaml]
@@ -243,7 +272,10 @@ awx-deploy [--profile P] [--region R] trigger <kit> <action> <intent.json> --ten
 ```
 
 Run it as `uv run --all-packages awx-deploy ...`. `--tenants-table`, `--ledger-table` and
-`--secret-arn` override the stack lookup.
+`--secret-arn` override the stack lookup. With no `--region` it uses the Region recorded in
+`infra/cdk-outputs.json` (the `AwxRegion` output), and `us-west-2` when that file does not
+exist. The `awxpoc` CLI takes the Region from the outputs file it is given (`--config` or
+`AWXPOC_CONFIG`) and has no Region default.
 
 `deploy/k1.yaml`, `k5.yaml`, `k6.yaml`, `k7.yaml` and `k8.yaml` hold each kit's tenants rows
 and its ordered operator commands, taken from the "Setting up a deployed kit" section of the
@@ -355,13 +387,16 @@ action.
 
 `awxpoc` (package `awx_agent`) talks to the AgentCore Runtime and the approval API. It reads
 its configuration from the stack outputs file (`--config`, or the `AWXPOC_CONFIG` environment
-variable) and keeps its tokens under `~/.awxpoc`.
+variable) and keeps its tokens under `~/.awxpoc`. `awxpoc chat` with no `-m` runs a prompt
+loop. With or without `-m`, it prints the model that answered each reply to stderr, as
+`(answered by <model ID>)`. `stdout` carries only the `session <id>` line, the loop's `you> `
+prompt and the replies.
 
 ```
 export AWXPOC_CONFIG=infra/cdk-outputs.json
 uv run --all-packages awxpoc login --username demo-platform-requester
 uv run --all-packages awxpoc chat --kit k1 -m "What do we owe this week?"
-uv run --all-packages awxpoc chat --kit k1          # a prompt loop
+uv run --all-packages awxpoc chat --kit k1
 uv run --all-packages awxpoc proposals list --status PENDING
 uv run --all-packages awxpoc proposals show <proposal_id>
 
@@ -389,7 +424,8 @@ output still help to see which step failed.
 `scripts/deployed_security_checks.py` runs read-only checks against the deployed stacks. No
 money-moving tool is called. It needs the full deploy (all eight kit stacks), the
 `demo-platform-requester`, `demo-k6-operator` and `demo-k5-operator-approver` users and their
-`awx-poc/demo-users/*` secrets, and the outputs file. It uses the Region `ap-southeast-2`.
+`awx-poc/demo-users/*` secrets, and the outputs file. It runs in the Region the outputs file
+records (the `AwxRegion` output of `AwxAgentStack`).
 
 ```
 AWS_PROFILE=awx-deploy uv run --all-packages python scripts/deployed_security_checks.py

@@ -65,10 +65,11 @@ exports. The generic `KitStack` then builds `AwxKitK9` with one state machine pe
 spine adds a reader Lambda for kit 9 with that kit's read allowlists, and the agent stack adds
 the kit's tool Lambda and Gateway target. No CDK file changes.
 
-Synthesise just the new kit to check it:
+Synthesise just the new kit to check it, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```sh
-make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k9
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k9 REGION="$REGION"
 ```
 
 ## Rules the kit must follow

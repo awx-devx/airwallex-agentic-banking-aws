@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from awx_common.kits import KITS
+from awx_common.regions import DEFAULT_REGION, UnsupportedRegionError, default_model_ids
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
 from ..identity import jwt_claims_unverified
@@ -28,9 +29,8 @@ from .prompt import system_prompt
 
 log = logging.getLogger(__name__)
 
-DEFAULT_MODEL_ID = "au.anthropic.claude-sonnet-5"
-DEFAULT_FALLBACK_MODEL_ID = "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
-DEFAULT_REGION = "ap-southeast-2"
+# Local fallbacks only: the deployed Runtime always gets AWX_REGION and the model IDs.
+DEFAULT_MODEL_ID, DEFAULT_FALLBACK_MODEL_ID = default_model_ids(DEFAULT_REGION)
 _FALLBACK_CODES = frozenset(
     {"AccessDeniedException", "ValidationException", "ResourceNotFoundException"}
 )
@@ -38,6 +38,14 @@ _MAX_SESSIONS = 64
 _MAX_PROMPT_CHARS = 16_000
 
 app = BedrockAgentCoreApp()
+
+
+def _local_model_ids(region: str) -> tuple[str, str]:
+    """The Region's default inference profiles, or the default Region's for a Region with none."""
+    try:
+        return default_model_ids(region)
+    except UnsupportedRegionError:
+        return DEFAULT_MODEL_ID, DEFAULT_FALLBACK_MODEL_ID
 
 
 class InvocationError(ValueError):
@@ -112,8 +120,11 @@ def _default_agent(model_id: str, region: str, kit: str, tools: list[Any], messa
     from strands import Agent
     from strands.models import BedrockModel
 
+    # No sampling parameters: Claude Sonnet 5 rejects `temperature` with a ValidationException.
+    # Policy checks, approvals and workflows in code guard money movement. The agent does not
+    # rely on sampling settings for that.
     return Agent(
-        model=BedrockModel(model_id=model_id, region_name=region, temperature=0),
+        model=BedrockModel(model_id=model_id, region_name=region),
         system_prompt=system_prompt(kit),
         tools=tools,
         messages=messages,
@@ -145,6 +156,16 @@ def _error_code(exc: BaseException) -> str | None:
                 return str(code)
         cur = cur.__cause__ or cur.__context__
     return None
+
+
+MAX_ERROR_EXCERPT = 200
+
+
+def _error_excerpt(exc: BaseException, limit: int = MAX_ERROR_EXCERPT) -> str:
+    """The start of the exception message on one line, so a rejected request (for example a
+    ValidationException naming a parameter) reads differently from an unavailable model."""
+    text = " ".join(str(exc).split())
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 MAX_TOOL_PAGES = 20  # the Gateway pages tools/list (30 per page today; 61 tools in 3 pages)
@@ -181,8 +202,9 @@ def run_turn(
 ) -> dict[str, Any]:
     gateway_url = env["AWX_GATEWAY_URL"]
     region = env.get("AWX_REGION", DEFAULT_REGION)
-    models = [env.get("AWX_MODEL_ID", DEFAULT_MODEL_ID)]
-    fallback = env.get("AWX_FALLBACK_MODEL_ID", DEFAULT_FALLBACK_MODEL_ID)
+    default_primary, default_fallback = _local_model_ids(region)
+    models = [env.get("AWX_MODEL_ID", default_primary)]
+    fallback = env.get("AWX_FALLBACK_MODEL_ID", default_fallback)
     if fallback and fallback not in models:
         models.append(fallback)
     # The caller's sub is part of the key so one user's history never serves another user.
@@ -211,7 +233,12 @@ def run_turn(
                 last_exc = exc
                 code = _error_code(exc)
                 if code in _FALLBACK_CODES and not _used_tools(agent.messages[len(history) :]):
-                    log.warning("model %s unavailable (%s); trying fallback", model_id, code)
+                    log.warning(
+                        "model %s failed (%s: %s); trying fallback",
+                        model_id,
+                        code,
+                        _error_excerpt(exc),
+                    )
                     continue
                 raise
             SESSIONS.put(key, list(agent.messages))

@@ -41,8 +41,8 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_settle_seller_cycle",
         ToolKind.PROPOSE,
-        "Propose settling the current seller for one cycle: code computes the reserve, payout, "
-        "any receivable, and the approval needed.",
+        "Propose settling the current seller for one cycle: code computes the reserve, the "
+        "payout and any receivable.",
         _schema(cycle_id=_ID),
     ),
     ToolSpec(
@@ -64,7 +64,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         ToolKind.PROPOSE,
         "Record an operator's decision on a payout or recovery charge that has been in flight "
         "past the request_id deduplication window, from Airwallex's own evidence: landed or "
-        "not_landed. Needs two approvers. Sends nothing.",
+        "not_landed. Sends nothing.",
         {
             "type": "object",
             "properties": {

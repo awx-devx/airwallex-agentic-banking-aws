@@ -13,6 +13,7 @@ import io
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import boto3
 import pytest
@@ -460,6 +461,30 @@ def test_discovery_reads_the_spine_stack():
     assert deploy.discover(_Cfn(), ddb=None, sfn=None, ledger_table="L").ledger_table == "L"
 
 
+def test_a_missing_spine_stack_names_the_stack_and_the_region_searched():
+    from botocore.exceptions import ClientError
+
+    class Missing(_Cfn):
+        meta = SimpleNamespace(region_name="eu-west-1")
+
+        def describe_stacks(self, StackName):
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ValidationError",
+                        "Message": f"Stack with id {StackName} does not exist",
+                    }
+                },
+                "DescribeStacks",
+            )
+
+    with pytest.raises(deploy.DeployError) as caught:
+        deploy.discover(Missing(), ddb=None, sfn=None)
+    message = str(caught.value)
+    assert "AwxSpine not found in eu-west-1" in message
+    assert "pass --region" in message
+
+
 def test_the_cli_runs_put_run_and_apply(world, tmp_path):
     d, _, fake, _ = world
     rows = tmp_path / "rows.json"
@@ -560,6 +585,37 @@ def test_the_secret_is_read_with_the_profiles_client(monkeypatch):
     client = d.reader()
     assert client._credentials.get() is not None
     assert secrets.calls == ["arn:aws:secretsmanager:x:1:secret:s"]
+
+
+def test_region_comes_from_the_flag_then_the_outputs_file_then_the_default(tmp_path):
+    from awx_common.regions import DEFAULT_REGION
+
+    outputs = tmp_path / "cdk-outputs.json"
+    assert deploy.resolve_region(None, outputs) == DEFAULT_REGION
+    outputs.write_text(json.dumps({"AwxAgentStack": {"AwxRegion": "eu-west-1"}}))
+    assert deploy.resolve_region(None, outputs) == "eu-west-1"
+    assert deploy.resolve_region("ca-central-1", outputs) == "ca-central-1"
+    outputs.write_text(json.dumps({"AwxSpine": {}}))
+    with pytest.raises(deploy.DeployError, match="pass --region"):
+        deploy.resolve_region(None, outputs)
+
+
+def test_the_session_uses_the_outputs_files_region_with_no_flag(monkeypatch, tmp_path):
+    outputs = tmp_path / "cdk-outputs.json"
+    outputs.write_text(json.dumps({"AwxAgentStack": {"AwxRegion": "eu-west-2"}}))
+    monkeypatch.setattr(deploy, "OUTPUTS_FILE", outputs)
+    made: list[tuple] = []
+
+    class _Session:
+        def __init__(self, profile_name=None, region_name=None):
+            made.append((profile_name, region_name))
+
+        def client(self, name, *a, **kw):
+            return {"cloudformation": _Cfn(), "secretsmanager": _Secrets()}.get(name, object())
+
+    monkeypatch.setattr(boto3, "Session", _Session)
+    deploy.deployment_from_args(deploy.parser().parse_args(["plan", "x"]))
+    assert made == [(None, "eu-west-2")]
 
 
 class _PagedSfn:

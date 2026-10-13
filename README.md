@@ -96,7 +96,7 @@ packages/
 kits/              one package per kit, k1_treasury to k8_settlement
 infra/             the AWS CDK app: AwxSpine, AwxKitK1 to AwxKitK8, AwxAgentStack
 deploy/            per-kit deploy files for awx-deploy
-scripts/           secret scan and deployed security checks
+scripts/           secret scan, secret seeding and deployed security checks
 tests/             cross-cutting contract and security suites
 docs/              repository documentation and architecture diagrams
 ```
@@ -104,16 +104,25 @@ docs/              repository documentation and architecture diagrams
 ## Getting started
 
 Prerequisites: Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js for the AWS Cloud
-Development Kit (CDK) command line, which the Makefile runs through `npx`.
+Development Kit (CDK) command line, which the Makefile runs through `npx`. Set `REGION` in
+the shell before `make synth` (`export REGION=us-west-2`, or the Region of the deployment
+being updated):
 
 ```sh
-make help      # list every target
-make sync      # create the uv workspace environment
-make hooks     # run the secret scan on every commit (git config core.hooksPath .githooks)
-make check     # lint, secret scan and offline tests (no network once synced)
-make synth-test   # cdk synth and the synth-time security tests
-make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com   # synthesise every stack
+make help
+make sync
+make hooks
+make check
+make synth-test
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com REGION="$REGION"
 ```
+
+`make help` lists every target. `make sync` creates the uv workspace environment.
+`make hooks` sets `git config core.hooksPath .githooks`, so git runs the secret scan on every
+commit. `make check` runs the linters, the secret scan and the offline tests (no network once
+synced).
+`make synth-test` runs cdk synth and the synth-time security tests, and `make synth`
+synthesises every stack for `REGION`.
 
 `make check` and `make synth-test` take about 4 to 5 minutes each, and pytest prints only
 dots while it runs. `make synth` needs no AWS credentials, but downloads the pinned
@@ -123,10 +132,15 @@ layers.
 
 ## Deploying
 
+Set `REGION` in the shell first (`export REGION=us-west-2`, or the Region of the deployment
+being updated):
+
 ```sh
-make bootstrap ACCOUNT=<12-digit id>                       # once per account
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address>    # every stack, to ap-southeast-2
+make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"
 ```
+
+Run `make bootstrap` once per account and Region. `make deploy` deploys every stack.
 
 `cdk deploy` asks a person at a terminal to approve AWS Identity and Access Management (IAM)
 changes. In a shell with no terminal
@@ -158,8 +172,9 @@ Airwallex secret, create demo users and load each kit's state with `awx-deploy`.
 ## Limitations
 
 - Sandbox only. The Airwallex client refuses any host but the sandbox.
-- Single Region, ap-southeast-2, for the Australian Amazon Bedrock inference profiles the agent
-  uses.
+- One AWS Region per deployment (`REGION`, default `us-west-2`). Default model IDs exist for the
+  Regions listed in [docs/deployment.md](docs/deployment.md); another Region needs `MODEL_ID`
+  and `FALLBACK_MODEL_ID`.
 - No web UI. People use the `awxpoc` command line.
 - No schedules. Scheduled actions (kit 6 payroll, kit 7 collection and reconciliation, kit 8
   settlement and reconciliation) are started by an operator with `awx-deploy trigger`, so no

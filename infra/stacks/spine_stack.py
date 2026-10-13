@@ -587,14 +587,18 @@ class SpineStack(Stack):
                 ],
             )
 
+        # Budget names are unique per account, so the name carries the Region: a deployment in
+        # another Region of the same account gets its own budget. The cost filter keeps each
+        # budget to its own Region's costs, so no budget alerts on another deployment's spend.
         budgets.CfnBudget(
             self,
             "MonthlyBudget",
             budget=budgets.CfnBudget.BudgetDataProperty(
-                budget_name="awx-poc-monthly",
+                budget_name=f"awx-poc-monthly-{self.region}",
                 budget_type="COST",
                 time_unit="MONTHLY",
                 budget_limit=budgets.CfnBudget.SpendProperty(amount=MONTHLY_BUDGET_USD, unit="USD"),
+                cost_filters={"Region": [self.region]},
             ),
             notifications_with_subscribers=[
                 notify("ACTUAL", 50),

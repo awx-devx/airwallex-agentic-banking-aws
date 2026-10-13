@@ -14,7 +14,9 @@ def test_gateway_schema_keeps_only_supported_keywords_and_folds_the_rest():
     assert "one of AUD, USD" in props["currency"]["description"]
     assert "pattern=" in props["amount"]["description"]
     assert props["lines"]["items"]["properties"]["ref"] == {"type": "string"}
-    assert "nothing moves until a different person approves" in d["description"]
+    assert d["description"].endswith(
+        " Creates a proposal. Code sets its risk tier when you propose."
+    )
     # The identity field is a declared, optional property the server fills.
     assert props["_awx_caller"]["type"] == "string"
     assert "_awx_caller" not in d["inputSchema"]["required"]

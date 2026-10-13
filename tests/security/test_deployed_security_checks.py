@@ -1,7 +1,7 @@
 """Offline tests for scripts/deployed_security_checks.py: its judgement, with no AWS call.
 
-The script builds boto3 clients at import (no request is made) and talks to the Gateway only
-through `mcp`, which these tests replace.
+The script builds its boto3 clients in load_outputs, in the Region the outputs file names, and
+talks to the Gateway only through `mcp`, which these tests replace.
 """
 
 from __future__ import annotations
@@ -238,3 +238,38 @@ def test_a_broken_reply_fails_check_0_and_the_run_still_prints_its_summary(
     ), lines
     assert any(ln.startswith("FAIL  run stopped early  RuntimeError") for ln in lines), lines
     assert lines[-1].endswith(" passed")
+
+
+def _outputs(tmp_path, agent):
+    import json
+
+    path = tmp_path / "cdk-outputs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "AwxAgentStack": {
+                    "AwxGatewayUrl": "https://gw",
+                    "AwxUserPoolClientId": "c",
+                    **agent,
+                },
+                "AwxSpine": {"AirwallexSecretArn": "arn:aws:secretsmanager:x:1:secret:s"},
+            }
+        )
+    )
+    return path
+
+
+def test_clients_are_made_in_the_region_the_outputs_file_names(checks, tmp_path):
+    checks.load_outputs(_outputs(tmp_path, {"AwxRegion": "eu-west-1"}))
+    assert checks.REGION == "eu-west-1"
+    for client in (checks.sm, checks.idp, checks.lam, checks.cfn, checks.logs):
+        assert client.meta.region_name == "eu-west-1"
+
+
+def test_an_outputs_file_without_a_region_is_refused(checks, tmp_path):
+    path = _outputs(tmp_path, {})
+    with pytest.raises(SystemExit) as caught:
+        checks.load_outputs(path)
+    message = str(caught.value)
+    assert str(path) in message
+    assert "AwxAgentStack.AwxRegion" in message

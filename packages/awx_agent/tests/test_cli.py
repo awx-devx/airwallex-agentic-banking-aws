@@ -179,3 +179,31 @@ def test_approval_api_410_and_202_show_the_apis_own_text(env, capsys):
     )
     assert code == 0
     assert '"state": "PENDING"' in out
+
+
+@pytest.mark.parametrize(
+    ("body", "model"),
+    [
+        (b'{"kit": "k1", "model": "us.anthropic.claude-sonnet-5", "reply": "hello"}', None),
+        (b'{"reply": "hello"}', "an unknown model"),
+    ],
+    ids=["model-named", "model-missing"],
+)
+def test_chat_prints_the_answering_model_to_stderr(env, body, model):
+    _run(["login", "--username", "u", "--password-stdin"], env, stdin="pw\n")
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["chat", "--kit", "k1", "-m", "show balances"],
+        env=env,
+        http=lambda method, url, headers, data: (200, body),
+        cognito_factory=lambda r: FakeCognito(),
+        stdin=io.StringIO(""),
+        stdout=out,
+        stderr=err,
+    )
+    assert code == 0
+    named = model or json.loads(body)["model"]
+    assert err.getvalue() == f"(answered by {named})\n"
+    # stdout carries the session line and the reply, and never the model.
+    assert out.getvalue().splitlines()[1:] == ["hello"]
+    assert "answered by" not in out.getvalue()

@@ -68,6 +68,11 @@ def to_gateway_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+# Appended to every propose_* tool's description. Code sets the risk tier, which decides
+# whether a different person must approve the proposal, so no description says in advance
+# whether a proposal needs approval.
+PROPOSE_SUFFIX = " Creates a proposal. Code sets its risk tier when you propose."
+
 IDENTITY_PROPERTY = {
     "type": "string",
     "description": "Leave unset. The server fills this with the signed-in caller.",
@@ -84,9 +89,7 @@ def tool_definition(spec: ToolSpec) -> dict[str, Any]:
     """
     description = spec.description.strip()
     if spec.kind.value == "PROPOSE":
-        description += (
-            " Creates a proposal only; nothing moves until a different person approves it."
-        )
+        description += PROPOSE_SUFFIX
     input_schema = to_gateway_schema(spec.input_schema)
     input_schema.setdefault("properties", {})[IDENTITY_FIELD] = dict(IDENTITY_PROPERTY)
     return {"name": spec.name, "description": description, "inputSchema": input_schema}

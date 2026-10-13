@@ -45,7 +45,7 @@ _TERMS_PROPERTIES: dict[str, Any] = {
         "pattern": r"^[0-9a-f]{64}$",
         "description": "Lower-case hex SHA-256 of the exact vendor terms document these values "
         "were read from (for example the output of `sha256sum terms.pdf`). The person supplies "
-        "it with the document; it is recorded in the proposal so the approval names one "
+        "it with the document; it is recorded in the proposal, which names one "
         "document. Never invent one: ask the person for it",
     },
     "forecast_flows": {
@@ -94,7 +94,7 @@ _CARD_OR_PURCHASE_SCHEMA = _obj(
         "card_id": _CARD_ID,
         "purchase_ref": {
             **_TERMS_PROPERTIES["purchase_ref"],
-            "description": "The purchase_ref an approved issue_card used; finds that card",
+            "description": "The purchase_ref an issue_card proposal used; finds that card",
         },
     },
     [],
@@ -116,8 +116,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         "read_card_controls",
         ToolKind.READ,
         "Read a card's id, status, authorization controls and remaining limits. Give exactly "
-        "one of card_id or purchase_ref; after an approved issue_card, pass its purchase_ref "
-        "to learn the new card's id.",
+        "one of card_id or purchase_ref. With the purchase_ref of an issue_card run it returns "
+        "the card's id, if the run has issued the card.",
         _CARD_OR_PURCHASE_SCHEMA,
     ),
     ToolSpec(
@@ -130,35 +130,34 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_issue_card",
         ToolKind.PROPOSE,
-        "Propose a cardholder and a virtual card whose controls enforce the chosen plan. Needs "
-        "human approval of the exact control set before anything is created. For a card the "
-        "limit test may run on, use a purchase_ref starting 'limit-test-'. Once approved, "
-        "read_card_controls with the same purchase_ref returns the card id.",
+        "Propose a cardholder and a virtual card whose controls enforce the chosen plan. The "
+        "proposal holds the exact control set. For a card the limit test may run on, use a "
+        "purchase_ref starting 'limit-test-'. read_card_controls with the same purchase_ref "
+        "returns the card id, if the run has issued the card.",
         _TERMS_SCHEMA,
     ),
     ToolSpec(
         "propose_update_card_controls",
         ToolKind.PROPOSE,
-        "Propose new controls for a kit 2 card from updated terms. A raise needs approval; a "
-        "pure reduction runs without one.",
+        "Propose new controls for a kit 2 card from updated terms.",
         _obj({"card_id": _CARD_ID, **_TERMS_PROPERTIES}, ["card_id", *_TERMS_REQUIRED]),
     ),
     ToolSpec(
         "propose_freeze_card",
         ToolKind.PROPOSE,
-        "Freeze a kit 2 card now (revokes its authority; no approval needed).",
+        "Propose freezing a kit 2 card. Freezing revokes the card's spending authority.",
         _CARD_ACTION_SCHEMA,
     ),
     ToolSpec(
         "propose_unfreeze_card",
         ToolKind.PROPOSE,
-        "Unfreeze a kit 2 card. Restores spending authority, so it needs approval.",
+        "Propose unfreezing a kit 2 card. Unfreezing restores the card's spending authority.",
         _CARD_ACTION_SCHEMA,
     ),
     ToolSpec(
         "propose_close_card",
         ToolKind.PROPOSE,
-        "Close a kit 2 card permanently. Irreversible, so it needs approval.",
+        "Propose closing a kit 2 card permanently. Closing is irreversible.",
         _CARD_ACTION_SCHEMA,
     ),
     ToolSpec(

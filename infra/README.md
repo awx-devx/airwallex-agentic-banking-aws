@@ -33,7 +33,9 @@ over every stack, and each suppression carries its reason in the code.
 | Context | Default | Meaning |
 |---|---|---|
 | `account` | the `CDK_DEFAULT_ACCOUNT` environment variable | The 12-digit AWS account to build for. If neither is set, synth fails rather than target an account by accident. |
-| `region` | `ap-southeast-2` | The AWS Region. |
+| `region` | `us-west-2` (`DEFAULT_REGION` in `awx_common.regions`) | The AWS Region. `make` passes `REGION`. See "Region and models" in [docs/deployment.md](../docs/deployment.md) for the Region table. |
+| `model_id` | the Region's primary inference profile, for example `us.anthropic.claude-sonnet-5` | The agent's model or inference profile ID. `make` passes `MODEL_ID`. Required, with `fallback_model_id`, for a Region outside the Region table in [docs/deployment.md](../docs/deployment.md). |
+| `fallback_model_id` | the Region's fallback inference profile, for example `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | The model the agent falls back to. `make` passes `FALLBACK_MODEL_ID`. |
 | `alert_email` | `AWX_ALERT_EMAIL` | Where alarms and budget alerts go. Required. The SNS subscription's logical id includes the address, so changing it replaces the subscription. |
 | `kits` | every kit | A comma-separated subset, for example `-c kits=k1,k4`. An empty or unknown list is refused. See "Partial deploys". |
 | `sandbox` | `true` | Sandbox mode (runner rule 10 in `awx_common.workflow`): a finality poll may run the kit's sandbox simulation to advance an object, for example to settle a transfer. `-c sandbox=false` sets `AWX_SANDBOX_MODE=0` on every kit-step Lambda. Only sandbox mode is deployed and tested. |
@@ -45,19 +47,23 @@ tests do). See `awx_agent.staging`.
 
 ## Synth and deploy
 
-From the repository root:
+From the repository root, with `REGION` set in the shell (`export REGION=us-west-2`, or the
+Region of the deployment being updated):
 
 ```
 make sync
 make check
 make synth-test
-make synth  ACCOUNT=111122223333 ALERT_EMAIL=you@example.com [KITS=k1,k4]
-make bootstrap ACCOUNT=<12-digit id>
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> [KITS=k1,k4] [CDK_ARGS=...]
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com REGION="$REGION"
+make bootstrap ACCOUNT=<12-digit id> REGION="$REGION"
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> REGION="$REGION"
 ```
 
-`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/ap-southeast-2` once per account from
-the repository root, where no `cdk.json` loads the app, so it needs no alert address.
+`make synth` and `make deploy` also take `KITS` (for example `KITS=k1,k4`), `MODEL_ID`,
+`FALLBACK_MODEL_ID` and `CDK_ARGS`.
+
+`make bootstrap` runs `cdk bootstrap aws://<12-digit id>/<REGION>` once per account and Region
+from the repository root, where no `cdk.json` loads the app, so it needs no alert address.
 `CDK_ARGS` passes extra CDK CLI arguments to `cdk synth` and `cdk deploy`. `cdk deploy` asks a
 person at a terminal to approve AWS Identity and Access Management (IAM) changes. A shell
 with no terminal (a continuous
@@ -75,12 +81,14 @@ needed for a deploy (see [docs/testing.md](../docs/testing.md) for the sandbox l
 
 ```
 cd infra
-npx -y aws-cdk@2.1144.0 synth --all -c account=111122223333 -c alert_email=you@example.com
+npx -y aws-cdk@2.1144.0 synth --all -c account=111122223333 -c alert_email=you@example.com \
+    -c region="$REGION"
 npx -y aws-cdk@2.1144.0 deploy --all --outputs-file cdk-outputs.json \
-    -c account=<12-digit id> -c alert_email=<address> [--require-approval never]
+    -c account=<12-digit id> -c alert_email=<address> -c region="$REGION"
 ```
 
-Add `-c kits=k1,k4` to either when `KITS` is set, and the contents of `CDK_ARGS` at the end.
+Add `-c kits=k1,k4` to the synth or deploy command when `KITS` is set, and the contents of `CDK_ARGS` at the end,
+for example `--require-approval never` in a shell with no terminal.
 `cdk deploy --all` orders the stacks itself:
 spine, kit stacks, agent stack. `infra/cdk-outputs.json` holds the stack outputs (Gateway URL,
 Runtime ARN, user pool client, approval API URL, secret ARN, tenants table). `awxpoc --config`
@@ -108,7 +116,7 @@ use"), and CDK deploys producers first. So removing or renaming a `SPECS` action
 a state machine or a reader, takes two deploys:
 
 1. Deploy the consumer first without the reference, for example
-   `npx -y aws-cdk@2.1144.0 deploy AwxAgentStack --exclusively ...` with the tool removed.
+   `npx -y aws-cdk@2.1144.0 deploy AwxAgentStack --exclusively -c region="$REGION" ...` with the tool removed.
 2. Then deploy the producer (the kit stack or the spine).
 
 Alternatively keep the old export for one deploy with `stack.export_value(...)` in the
@@ -171,8 +179,9 @@ These are instructions for a person. Nothing here is run by the build.
 
 ### Order
 
-`npx -y aws-cdk@2.1144.0 destroy --all -c account=<id> -c alert_email=<address>` from `infra/`,
-with no `-c kits=` so every kit stack is in the app. The CLI destroys the agent stack, then
+Set `REGION` in the shell to the Region of the deployment being removed. Then run
+`npx -y aws-cdk@2.1144.0 destroy --all -c account=<id> -c alert_email=<address> -c region="$REGION"`
+from `infra/`, with no `-c kits=` so every kit stack is in the app. The CLI destroys the agent stack, then
 the kit stacks, then the spine:
 
 - the agent stack imports every kit's state machines;
@@ -183,7 +192,8 @@ To remove one kit, deploy the agent stack with `-c kits=` naming the other kits,
 this from `infra/`, with no `-c kits=` context:
 
 ```
-npx -y aws-cdk@2.1144.0 destroy --exclusively AwxKitK<N> -c account=<id> -c alert_email=<address>
+npx -y aws-cdk@2.1144.0 destroy --exclusively AwxKitK<N> -c account=<id> -c alert_email=<address> \
+    -c region="$REGION"
 ```
 
 With `-c kits=`, `AwxKitK<N>` is not in the app and the CLI cannot find the stack. Without
@@ -207,7 +217,9 @@ order:
    CloudFormation, then schedule the key's deletion (7 to 30 days) once nothing it encrypts is
    left.
 
-The AWS Budget `awx-poc-monthly` is a spine resource, so `cdk destroy --all` deletes it.
+The budget `awx-poc-monthly-<region>` (AWS Budgets) is a spine resource, so
+`cdk destroy --all` deletes it. The name carries the Region and the budget counts only that
+Region's costs, so each Region's deployment in an account has its own budget.
 
 ### Outside CloudFormation
 

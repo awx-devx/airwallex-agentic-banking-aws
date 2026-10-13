@@ -9,6 +9,9 @@ piece of state a kit needs reaches it through here, with operator AWS credential
     awx-deploy ... apply <deploy-file> [--var K=V ...] [--vars vars.json] [--from N]
     awx-deploy ... trigger <kit> <action> <intent.json> --tenant <tenant_id>
 
+`--region` defaults to the Region recorded in infra/cdk-outputs.json, else
+awx_common.regions.DEFAULT_REGION.
+
 - `tenants put` writes kit-bound tenants rows. Every row passes `tenant_from_row`; a
   connected account may appear on one row only, in any kit (an `account#<acct>` marker item is
   written in the same transaction, and existing rows are scanned too); rows are written
@@ -47,6 +50,7 @@ from awx_common.errors import TenantScopeViolation
 from awx_common.kits import KIT_DIRS
 from awx_common.operator_commands import OperatorCommandError, OperatorContext, run_operator_command
 from awx_common.ops import ReadRequest
+from awx_common.regions import DEFAULT_REGION
 from awx_common.store import KitStore
 from awx_common.tenancy import (
     ROLE_CUSTOMER,
@@ -61,6 +65,27 @@ from .kit_store import DynamoDbKitStore
 from .repos import DynamoDbTenantResolver
 
 SPINE_STACK = "AwxSpine"
+# The file `make deploy` writes (cdk deploy --outputs-file, run from infra/).
+OUTPUTS_FILE = Path(__file__).resolve().parents[4] / "infra" / "cdk-outputs.json"
+
+
+def resolve_region(region: str | None, outputs_file: Path | None = None) -> str:
+    """--region, else the Region recorded in the outputs file (AwxAgentStack.AwxRegion), else
+    awx_common.regions.DEFAULT_REGION."""
+    if region:
+        return region
+    outputs_file = outputs_file or OUTPUTS_FILE
+    if outputs_file.is_file():
+        try:
+            recorded = json.loads(outputs_file.read_text())["AwxAgentStack"]["AwxRegion"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise DeployError(
+                f"{outputs_file}: no AwxAgentStack.AwxRegion ({exc!r}); pass --region"
+            ) from None
+        return str(recorded)
+    return DEFAULT_REGION
+
+
 MACHINE_PREFIX = "awx-"  # infra.constructs.kit_workflow.MACHINE_PREFIX (awx-<kit>-<action>)
 ACCOUNT_MARKER = "account#"  # tenants-table item holding one account's owner (never a tenant)
 # Schedule-driven actions (origin SCHEDULE keeps the policy tier; the agent floor does not
@@ -181,7 +206,21 @@ def discover(
     """Table names and the secret ARN from the spine stack: its outputs (TenantsTableName,
     AirwallexSecretArn) and its resources (the Ledger table has no output, so it is found by
     its logical id). State machines are found by their fixed awx-<kit>-<action> names."""
-    stack = cfn.describe_stacks(StackName=spine_stack)["Stacks"][0]
+    from botocore.exceptions import ClientError
+
+    try:
+        stack = cfn.describe_stacks(StackName=spine_stack)["Stacks"][0]
+    except ClientError as exc:
+        error = exc.response.get("Error") or {}
+        if error.get("Code") != "ValidationError" or "does not exist" not in str(
+            error.get("Message", "")
+        ):
+            raise
+        region = getattr(getattr(cfn, "meta", None), "region_name", None) or "the client's Region"
+        raise DeployError(
+            f"stack {spine_stack} not found in {region}; pass --region with the Region it was "
+            "deployed to"
+        ) from None
     outputs = {o["OutputKey"]: o["OutputValue"] for o in stack.get("Outputs", [])}
     ledger = overrides.get("ledger_table")
     if not ledger:
@@ -738,7 +777,11 @@ def _variables(args: argparse.Namespace) -> dict[str, str]:
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="awx-deploy", description=__doc__.split("\n\n")[0])
     p.add_argument("--profile")
-    p.add_argument("--region", default="ap-southeast-2")
+    p.add_argument(
+        "--region",
+        help="the deployment's Region (default: the Region in infra/cdk-outputs.json, "
+        f"else {DEFAULT_REGION})",
+    )
     p.add_argument("--spine-stack", default=SPINE_STACK)
     p.add_argument("--tenants-table")
     p.add_argument("--ledger-table")
@@ -778,7 +821,7 @@ def parser() -> argparse.ArgumentParser:
 def deployment_from_args(args: argparse.Namespace) -> Deployment:
     import boto3
 
-    session = boto3.Session(profile_name=args.profile, region_name=args.region)
+    session = boto3.Session(profile_name=args.profile, region_name=resolve_region(args.region))
     return discover(
         session.client("cloudformation"),
         ddb=session.client("dynamodb"),

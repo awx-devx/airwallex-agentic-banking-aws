@@ -13,6 +13,7 @@ reader_for(kit), grant_proposal_outcome_read, ledger_table, tenants_table, propo
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from aws_cdk import CfnOutput, Stack
@@ -23,7 +24,15 @@ from infra.constructs.agentcore_runtime import AgentCoreRuntime
 
 
 class AgentStack(Stack):
-    def __init__(self, scope: Construct, id: str, *, spine: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        id: str,
+        *,
+        spine: Any,
+        model_ids: Sequence[str],
+        **kwargs: Any,
+    ) -> None:
         super().__init__(scope, id, **kwargs)
         self.spine = spine
 
@@ -45,6 +54,7 @@ class AgentStack(Stack):
             user_pool=spine.user_pool,
             client=self.client,
             gateway_url=self.gateway.gateway_url,
+            model_ids=model_ids,
         )
         self.runtime = rt.runtime
 

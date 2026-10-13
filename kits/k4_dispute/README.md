@@ -133,11 +133,12 @@ reader (`ReaderK4Fn`), which may call only these GET paths for kit 4:
 - `/api/v1/pa/refunds`
 - `/api/v1/pa/payment_intents/{id}`
 
-To synth or deploy only this kit:
+To synth or deploy only this kit, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k4
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k4
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k4 REGION="$REGION"
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k4 REGION="$REGION"
 ```
 
 A partial deploy over a full one removes the other kits' tools from the agent's Gateway.

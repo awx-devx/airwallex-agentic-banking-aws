@@ -45,7 +45,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         description=(
             "Propose the one replacement for a transfer Airwallex reports CANCELLED with a "
             "replaceable failure_type. Code copies amount and beneficiary from the original and "
-            "refuses if the original is in flight or already replaced. Needs one approver."
+            "refuses if the original is in flight or already replaced."
         ),
         input_schema={
             "type": "object",
@@ -61,8 +61,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         name="propose_close_incident",
         kind=ToolKind.PROPOSE,
         description=(
-            "Record an incident's closure once the original is CANCELLED with a failure code "
-            "and its one replacement is PAID or CANCELLED. Moves no money."
+            "Record an incident's closure. Code blocks it unless the original is CANCELLED "
+            "with a failure code and its one replacement is PAID or CANCELLED. Moves no money."
         ),
         input_schema={
             "type": "object",
@@ -76,7 +76,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         kind=ToolKind.PROPOSE,
         description=(
             "Sandbox only: move a kit-3 transfer to SENT, then FAILED with a failure_type, so it "
-            "ends CANCELLED. Needs one approver."
+            "ends CANCELLED."
         ),
         input_schema={
             "type": "object",

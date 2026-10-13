@@ -118,11 +118,12 @@ declares no extra functions. From the synthesised templates:
 | `AwxAgentStack` | the `K8ToolsHandler` tool Lambda (read and propose only) and its AgentCore Gateway target, "Marketplace Settlement Agent read and propose tools" |
 | `AwxSpine` | the kit 8 reader (`ReaderK8Fn`), allowed platform `GET /api/v1/connected_account_transfers`, `/api/v1/connected_account_transfers/{id}`, `/api/v1/charges`, `/api/v1/charges/{id}`, and tenant `GET /api/v1/balances/current` |
 
-To synth or deploy only this kit:
+To synth or deploy only this kit, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k8
-make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k8
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k8 REGION="$REGION"
+make deploy ACCOUNT=<12-digit id> ALERT_EMAIL=<address> KITS=k8 REGION="$REGION"
 ```
 
 A partial deploy over a full one removes the other kits' tools from `AwxAgentStack`. See

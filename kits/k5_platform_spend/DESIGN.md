@@ -458,8 +458,8 @@ The acceptance test is
 
 ## Synth
 
-`make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k5` (or, from `infra/`,
-`npx -y aws-cdk@2.1144.0 synth --all -c account=111122223333 -c alert_email=you@example.com -c kits=k5`)
+`make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com REGION="$REGION" KITS=k5` (or, from
+`infra/`, `npx -y aws-cdk@2.1144.0 synth --all -c account=111122223333 -c alert_email=you@example.com -c region="$REGION" -c kits=k5`)
 builds `AwxSpine`, `AwxKitK5` and the agent stack with no credentials: one state machine per
 action, no kit functions. Kit-specific
 synth assertions are in `tests/test_synth.py` (marker `synth`).

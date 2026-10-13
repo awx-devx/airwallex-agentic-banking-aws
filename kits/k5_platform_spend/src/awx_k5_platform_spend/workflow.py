@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from awx_common import Money, Operation, OperationResult, OperationStatus, ReadRequest, RiskTier
@@ -159,6 +159,12 @@ NOT_CONFIGURED = "kit 5 is not configured yet"
 
 class KitNotConfigured(RuntimeError):
     """No platform setup has been seeded: tools answer NOT_CONFIGURED."""
+
+
+def kit_today(ctx: PolicyContext) -> date:
+    """The UTC date the kit treats as today: register_shortfall, bridge_shortfall and
+    read_bridge_position all decide "due today" from it, so a read never disagrees with them."""
+    return ctx.now.astimezone(UTC).date()
 
 
 def configure_platform(setup: PlatformSetup | None) -> None:
@@ -439,7 +445,7 @@ def assess_register(intent, ctx: PolicyContext, book: PlatformBook) -> PolicyDec
     candidate, _rid, available, blocked = _shortfall(intent, ctx, book)
     if blocked is not None:
         return blocked
-    reason = eligibility(candidate, book.config, ctx.now.date())
+    reason = eligibility(candidate, book.config, kit_today(ctx))
     if reason is not None:
         return _blocked(f"not eligible for a bridge: {reason}")
     return PolicyDecision(
@@ -527,7 +533,7 @@ def assess_bridge(
     candidate, rid, available, blocked = _shortfall(intent, ctx, book)
     if blocked is not None:
         return blocked
-    today = ctx.now.date()
+    today = kit_today(ctx)
     pool = book.ranking_pool(today=today, now=ctx.now, max_age=spec_ttl, exclude={candidate.key})
     pool.append(candidate)
     headroom = _platform_headroom(ctx, book)

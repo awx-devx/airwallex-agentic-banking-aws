@@ -530,7 +530,7 @@ def test_read_tools_are_tenant_bound_and_leak_no_accounts():
         assert READS["read_cards"]({}, ctx) == {"cards": []}
         assert READS["read_card_transactions"]({"card_id": "card_1"}, ctx) == {"transactions": []}
         position = READS["read_bridge_position"]({}, ctx)
-        assert set(position) == {"receivable", "bridges_in_flight", "queued_shortfalls"}
+        assert set(position) == {"as_of", "receivable", "bridges_in_flight", "queued_shortfalls"}
         assert "acct_" not in str(position)
         reads = [r for r in p.fake.requests if r[0] == "GET"]
         assert reads
@@ -562,3 +562,90 @@ def test_transaction_time_parses_sandbox_and_fake_formats(raw):
     assert got is not None
     assert got.replace(microsecond=0) == datetime(2026, 10, 6, 4, 49, 6, tzinfo=UTC)
     assert _transaction_time({"transaction_date": "not a date"}) is None
+
+
+def test_read_bridge_position_gives_each_queued_shortfall_its_own_due_date_and_status():
+    from datetime import timedelta
+
+    from awx_k5_platform_spend.allocator import BridgeCandidate
+    from awx_k5_platform_spend.book import Obligation
+
+    today = NOW.date()
+    obligations = [
+        Obligation("ob-a1", "t-alpha", usd("500"), today, today + timedelta(days=2)),
+        Obligation("ob-a2", "t-alpha", usd("500"), today - timedelta(days=1), today),
+        Obligation(
+            "ob-a3", "t-alpha", usd("500"), today + timedelta(days=2), today + timedelta(days=3)
+        ),
+        Obligation(
+            "ob-b1", "t-bravo", usd("700"), today + timedelta(days=1), today + timedelta(days=3)
+        ),
+    ]
+    p = Platform(wallets={"t-alpha": "100", "t-bravo": "100"}, obligations=obligations)
+    configure_platform(p.setup)
+    try:
+
+        def queue(tenant, obligation_id, due_on):
+            p.book.register_candidate(
+                BridgeCandidate(
+                    tenant, obligation_id, usd("400"), due_on, due_on + timedelta(days=2)
+                ),
+                observed_at=NOW,
+            )
+
+        queue("t-alpha", "ob-a1", today)
+        queue("t-alpha", "ob-a2", today - timedelta(days=1))
+        queue("t-alpha", "ob-a3", today + timedelta(days=2))
+        # A queue entry naming another tenant's obligation, and one the setup does not hold:
+        # no date of theirs may reach the caller.
+        queue("t-alpha", "ob-b1", today)
+        queue("t-alpha", "ob-gone", today)
+        queue("t-bravo", "ob-b1", today + timedelta(days=1))
+        ctx = PolicyContext(
+            p.tenant("t-alpha"),
+            NOW,
+            p.fake.read,
+            store=InMemoryKitStore(),
+            platform_store=p.platform_store,
+        )
+        position = READS["read_bridge_position"]({}, ctx)
+        queued = {q["obligation_ref"]: q for q in position["queued_shortfalls"]}
+        shortfall = str(usd("400"))
+
+        def entry(ref, due_on, due_status):
+            return {
+                "obligation_ref": ref,
+                "shortfall": shortfall,
+                "due_on": due_on,
+                "due_status": due_status,
+            }
+
+        assert position["as_of"] == today.isoformat()
+        assert queued == {
+            "ob-a1": entry("ob-a1", today.isoformat(), "due_today"),
+            "ob-a2": entry("ob-a2", (today - timedelta(days=1)).isoformat(), "overdue"),
+            "ob-a3": entry("ob-a3", (today + timedelta(days=2)).isoformat(), "not_yet_due"),
+            "ob-b1": entry("ob-b1", None, None),
+            "ob-gone": entry("ob-gone", None, None),
+        }
+        assert (today + timedelta(days=1)).isoformat() not in str(position)
+        assert "acct_" not in str(position)
+    finally:
+        configure_platform(None)
+
+
+@pytest.mark.parametrize(
+    ("zone", "hours", "expected_shift"),
+    [("Australia/Sydney", 9, -1), ("America/Los_Angeles", 20, 1), ("UTC", 12, 0)],
+)
+def test_kit_today_is_the_utc_date_whatever_zone_ctx_now_carries(zone, hours, expected_shift):
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from awx_k5_platform_spend.workflow import kit_today
+
+    day = NOW.date()
+    local = datetime(day.year, day.month, day.day, hours, tzinfo=ZoneInfo(zone))
+    ctx = PolicyContext(Platform().tenant("t-alpha"), local, lambda req: {})
+    assert kit_today(ctx) == local.astimezone(UTC).date()
+    assert kit_today(ctx) == day + timedelta(days=expected_shift)

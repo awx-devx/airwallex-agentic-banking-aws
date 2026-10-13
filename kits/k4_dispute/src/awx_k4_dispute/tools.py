@@ -70,8 +70,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         name="propose_accept_dispute",
         kind=ToolKind.PROPOSE,
         description=(
-            "Propose accepting a dispute with a typed reason. Accepting is irreversible and "
-            "always needs a person's approval. Copy disputed_amount exactly from read_dispute."
+            "Propose accepting a dispute with a typed reason. Accepting is irreversible. Copy "
+            "disputed_amount exactly from read_dispute."
         ),
         input_schema=_obj(
             ["dispute_id", "disputed_amount", "reason", "rationale"],
@@ -88,8 +88,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         kind=ToolKind.PROPOSE,
         description=(
             "Propose challenging a dispute with evidence_ids already ingested for it, cited "
-            "facts and a short narrative for the approver. Needs approval; code blocks it "
-            "when the economics, evidence minimum or deadline do not support it. A dispute "
+            "facts and a short narrative. Code blocks it when the "
+            "economics, evidence minimum or deadline do not support it. A dispute "
             "is challenged once." + _DATA_NOTE
         ),
         input_schema=_obj(
@@ -124,9 +124,9 @@ TOOLS: tuple[ToolSpec, ...] = (
         name="propose_clear_dispute_response",
         kind=ToolKind.PROPOSE,
         description=(
-            "Ask a person to clear an accept or challenge whose outcome is unknown, once "
-            "Airwallex shows no such response at its stage. Pass the attempt's request_ref "
-            "from read_dispute. Code refuses unless a fresh read-back is empty; one approval."
+            "Propose clearing an accept or challenge whose outcome is unknown. Pass the "
+            "attempt's request_ref from read_dispute. Code blocks it unless a fresh read-back "
+            "shows no such response at its stage."
         ),
         input_schema=_obj(
             ["dispute_id", "request_ref", "note"],

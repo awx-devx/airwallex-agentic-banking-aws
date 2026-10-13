@@ -73,6 +73,18 @@ returns an `acct_` value.
 | `propose_issue_card` | PROPOSE | `awx-k5-issue_card` | SINGLE |
 | `propose_simulate_card_spend` | PROPOSE | `awx-k5-simulate_card_spend` | SINGLE |
 
+`read_bridge_position` returns `as_of`, the Coordinated Universal Time (UTC) date the kit treats
+as today, with the caller's own receivable, the amounts of its bridges in flight and its queued
+shortfalls. Each queued shortfall carries its `obligation_ref`, its `shortfall`, the
+obligation's `due_on` from the platform setup and a `due_status` of `due_today`, `overdue` or
+`not_yet_due` against `as_of`.
+`due_on` and `due_status` are `null` when the setup holds no such obligation for the caller.
+`as_of` comes from the clock `register_shortfall` and `bridge_shortfall` use to decide whether a
+payment is due today, so the read and the actions agree. A shortfall already queued is already
+registered: proposing `register_shortfall` for it again only refreshes its queued amount and
+observation time, and is blocked unless the payment is due today. The read returns no platform
+capital, no other tenant's figures and no account identifiers.
+
 `register_shortfall` and `reconcile_bridge` lower the agent floor to AUTO because neither sends
 anything to Airwallex or moves money; [DESIGN.md](DESIGN.md#approval-rules) gives the reasoning.
 
@@ -133,10 +145,11 @@ call these GET paths:
 | platform (no header) | `/api/v1/balances/current`, `/api/v1/connected_account_transfers[/<id>]`, `/api/v1/charges[/<id>]` |
 | tenant (`x-on-behalf-of`) | `/api/v1/balances/current`, `/api/v1/issuing/cardholders[/<id>]`, `/api/v1/issuing/cards[/<id>]`, `/api/v1/issuing/transactions` |
 
-Synth or deploy only this kit:
+Synth or deploy only this kit, with `REGION` set in the shell
+(`export REGION=us-west-2`, or the Region of the deployment being updated):
 
 ```
-make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k5
+make synth ACCOUNT=111122223333 ALERT_EMAIL=you@example.com KITS=k5 REGION="$REGION"
 ```
 
 A partial deploy (`make deploy ... KITS=k5`) over a full one removes the other kits' tools from
@@ -166,7 +179,7 @@ proposal is BLOCKED; nothing reaches Airwallex.
    `apply` writes the tenants rows (kit `k5`, role `customer`) and runs the operator commands
    `seed_platform_setup` and `fund_capital`.
 
-   Set `K5_DUE_ON` to the UTC (Coordinated Universal Time) date of the day you run the bridge demo, and
+   Set `K5_DUE_ON` to the UTC date of the day you run the bridge demo, and
    `K5_EXPECTED_DEPOSIT_ON` to that date or up to 7 days (`max_bridge_days`) later. A bridge is
    only for a payment due today: on any other day `propose_register_shortfall` and
    `propose_bridge_shortfall` are BLOCKED with "payment is not due today". To run the demo on a

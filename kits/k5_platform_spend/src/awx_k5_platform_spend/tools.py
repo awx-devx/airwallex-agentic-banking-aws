@@ -49,14 +49,14 @@ TOOLS: tuple[ToolSpec, ...] = (
         "propose_issue_card",
         ToolKind.PROPOSE,
         "Propose a virtual card for the customer under a named card program. The cardholder is "
-        "created server-side; limits come from the program. Needs one approver.",
+        "created server-side; limits come from the program.",
         _schema({"cardholder_ref": _REF, "program": _REF}, _RATIONALE),
     ),
     ToolSpec(
         "propose_simulate_card_spend",
         ToolKind.PROPOSE,
         "Sandbox only: simulate one card transaction on a card this kit issued. Each "
-        "scenario_ref runs once; a replay is refused. Needs one approver.",
+        "scenario_ref runs once; a replay is refused.",
         _schema(
             {
                 "scenario_ref": _REF,
@@ -70,7 +70,12 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "read_bridge_position",
         ToolKind.READ,
-        "The customer's own bridge receivable, bridges in flight and queued shortfalls.",
+        "The customer's own bridge receivable, bridges in flight and queued shortfalls. as_of is "
+        "the UTC date the kit treats as today. Each queued shortfall has its obligation's due "
+        "date (due_on) and a due_status of due_today, overdue or not_yet_due, each null if "
+        "unknown. A queued shortfall is already registered: proposing register_shortfall for it "
+        "again only refreshes its queued amount and observation time, and is blocked unless the "
+        "payment is due today.",
         _schema({}),
     ),
     ToolSpec(
@@ -92,15 +97,15 @@ TOOLS: tuple[ToolSpec, ...] = (
         "propose_reconcile_bridge",
         ToolKind.PROPOSE,
         "Check a bridge that is still in flight for this customer's obligation and record its "
-        "outcome if the provider has settled or failed it. Moves no money; anything not "
-        "definitive is left for a person.",
+        "outcome if the provider has settled or failed it. Moves no money, and code records "
+        "only a definitive outcome.",
         _schema({"obligation_ref": _REF}, _RATIONALE),
     ),
     ToolSpec(
         "propose_collect_fee",
         ToolKind.PROPOSE,
         "Propose charging the customer's monthly platform fee for a period (YYYY-MM). The fee "
-        "comes from the fee schedule; needs one approver.",
+        "comes from the fee schedule.",
         _schema(
             {"period": {"type": "string", "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])$"}}, _RATIONALE
         ),
@@ -108,8 +113,8 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_collect_repayment",
         ToolKind.PROPOSE,
-        "Propose collecting the customer's open bridge advance back once their deposit has "
-        "landed. The amount is the ledger receivable; needs one approver.",
+        "Propose collecting the customer's open bridge advance back. The amount is the ledger "
+        "receivable. Code checks whether it can run when you propose.",
         _schema({}, _RATIONALE),
     ),
 )

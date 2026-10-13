@@ -87,9 +87,9 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "propose_release_obligation",
         ToolKind.PROPOSE,
-        "Ask a person to release (or mark paid) an obligation whose payment is stuck and that "
-        "read_obligations reports as needs_person. Code reads the provider evidence and sets "
-        "the approval tier; nothing is sent to Airwallex.",
+        "Propose releasing (or marking paid) an obligation whose payment is stuck and that "
+        "read_obligations reports as needs_person. Code reads the provider evidence; nothing "
+        "is sent to Airwallex.",
         {
             "type": "object",
             "properties": {
@@ -104,8 +104,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         "propose_execute_plan",
         ToolKind.PROPOSE,
         "Propose executing the plan for the named obligations: one FX conversion per currency "
-        "that needs it, then one transfer per obligation. Code computes every amount and the "
-        "approval tier; a person approves when the tier requires it.",
+        "that needs it, then one transfer per obligation. Code computes every amount.",
         {
             "type": "object",
             "properties": {

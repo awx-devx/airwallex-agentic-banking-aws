@@ -328,6 +328,7 @@ def test_root_machines_are_named_per_action_and_the_grant_covers_only_this_kit(m
     root = __import__("pathlib").Path(__file__).resolve().parents[3]
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
+    from awx_common.regions import DEFAULT_REGION
     from infra.app import build_app
     from infra.constructs.kit_workflow import KitWorkflow, root_machine_name, run_timeout
     from infra.stacks.spine_stack import ADAPTER_TIMEOUT_S
@@ -336,9 +337,9 @@ def test_root_machines_are_named_per_action_and_the_grant_covers_only_this_kit(m
     module = types.ModuleType(MODULE)
     module.SPECS = specs
     monkeypatch.setitem(sys.modules, MODULE, module)
-    app = cdk.App(context={"account": "111122223333", "region": "ap-southeast-2"})
+    app = cdk.App(context={"account": "111122223333", "region": DEFAULT_REGION})
     build_app(app)
-    env = cdk.Environment(account="111122223333", region="ap-southeast-2")
+    env = cdk.Environment(account="111122223333", region=DEFAULT_REGION)
     stack = cdk.Stack(app, "RunStatusKit", env=env)
     spine = app.node.find_child("AwxSpine")
     from infra.kit_manifest import parse_workflow

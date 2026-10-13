@@ -56,6 +56,7 @@ def machines():
     root = __import__("pathlib").Path(__file__).resolve().parents[3]
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
+    from awx_common.regions import DEFAULT_REGION
     from infra.app import build_app
     from infra.constructs.kit_workflow import KitWorkflow
     from infra.kit_manifest import parse_workflow
@@ -65,8 +66,8 @@ def machines():
     saved = sys.modules.get(MODULE)
     sys.modules[MODULE] = module
     try:
-        app = cdk.App(context={"account": "111122223333", "region": "ap-southeast-2"})
-        env = cdk.Environment(account="111122223333", region="ap-southeast-2")
+        app = cdk.App(context={"account": "111122223333", "region": DEFAULT_REGION})
+        env = cdk.Environment(account="111122223333", region=DEFAULT_REGION)
         build_app(app)
         spine = app.node.find_child("AwxSpine")
         out = {}
