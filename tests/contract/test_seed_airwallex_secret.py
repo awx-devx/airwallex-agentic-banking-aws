@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 import pytest
+from botocore import exceptions as botocore_errors
 from botocore.exceptions import ClientError
 
 REPO = Path(__file__).resolve().parents[2]
@@ -178,7 +179,11 @@ def _echo_client_error(secret_string):
     ("fail", "shown"),
     [
         (_echo_runtime_error, "RuntimeError"),
-        (_echo_client_error, "ClientError (AccessDeniedException)"),
+        (
+            _echo_client_error,
+            "ClientError (AccessDeniedException) from PutSecretValue; these credentials might "
+            "not call PutSecretValue; use operator credentials for the deploy account",
+        ),
     ],
     ids=["runtime-error", "client-error"],
 )
@@ -191,11 +196,139 @@ def test_an_aws_error_is_one_line_with_no_value_in_it(tmp_path, capsys, cid, key
     assert out == ""
 
 
-def test_ctrl_c_during_the_upload_says_it_may_have_completed(tmp_path, capsys):
+def _client_error(code):
+    def fail(secret_string):
+        return ClientError(
+            {"Error": {"Code": code, "Message": f"echo {secret_string}"}}, "PutSecretValue"
+        )
+
+    return fail
+
+
+def _typed(make):
+    return lambda secret_string: make(f"echo {secret_string}")
+
+
+EXPIRED = "your AWS sign-in has expired; sign in again for that profile and retry"
+INVALID = "the credentials are not valid; check --profile"
+UNREACHABLE = "cannot reach AWS in us-west-2; check --region"
+DENIED = (
+    "ClientError ({code}) from PutSecretValue; these credentials might not call PutSecretValue; "
+    "use operator credentials for the deploy account"
+)
+CODE_LINE = "ClientError ({code}) from PutSecretValue; {hint}"
+
+
+@pytest.mark.parametrize(
+    ("fail", "shown"),
+    [
+        (
+            _typed(lambda m: botocore_errors.NoCredentialsError()),
+            "NoCredentialsError; no AWS credentials found; pass --profile with your operator "
+            "profile, or sign in for it and retry",
+        ),
+        (
+            _typed(lambda m: botocore_errors.ProfileNotFound(profile=m)),
+            "ProfileNotFound; the --profile is not in your AWS config; pass a profile that exists",
+        ),
+        (
+            _typed(lambda m: botocore_errors.TokenRetrievalError(provider="sso", error_msg=m)),
+            f"TokenRetrievalError; {EXPIRED}",
+        ),
+        (
+            _typed(lambda m: botocore_errors.UnauthorizedSSOTokenError()),
+            f"UnauthorizedSSOTokenError; {EXPIRED}",
+        ),
+        (
+            _typed(lambda m: botocore_errors.SSOTokenLoadError(error_msg=m)),
+            f"SSOTokenLoadError; {EXPIRED}",
+        ),
+        (
+            _typed(lambda m: botocore_errors.EndpointConnectionError(endpoint_url=m)),
+            f"EndpointConnectionError; {UNREACHABLE}",
+        ),
+        (
+            _typed(lambda m: botocore_errors.InvalidRegionError(region_name=m)),
+            f"InvalidRegionError; {UNREACHABLE}",
+        ),
+        (
+            _client_error("ExpiredToken"),
+            CODE_LINE.format(code="ExpiredToken", hint=EXPIRED),
+        ),
+        (
+            _client_error("ExpiredTokenException"),
+            CODE_LINE.format(code="ExpiredTokenException", hint=EXPIRED),
+        ),
+        (_client_error("AccessDenied"), DENIED.format(code="AccessDenied")),
+        (_client_error("AccessDeniedException"), DENIED.format(code="AccessDeniedException")),
+        (
+            _client_error("UnrecognizedClientException"),
+            CODE_LINE.format(code="UnrecognizedClientException", hint=INVALID),
+        ),
+        (
+            _client_error("InvalidClientTokenId"),
+            CODE_LINE.format(code="InvalidClientTokenId", hint=INVALID),
+        ),
+        (
+            _client_error("ResourceNotFoundException"),
+            CODE_LINE.format(
+                code="ResourceNotFoundException",
+                hint="no such secret in us-west-2; check --region, or pass --secret-id <ARN> "
+                "from the AwxSpine stack's outputs",
+            ),
+        ),
+        (
+            _client_error("ThrottlingException"),
+            "ClientError (ThrottlingException) from PutSecretValue",
+        ),
+    ],
+    ids=lambda value: value if isinstance(value, str) and " " not in value else None,
+)
+def test_each_common_aws_error_names_a_next_step_and_no_value(tmp_path, capsys, fail, shown):
+    session = _Session(fail=fail)
+    code, _ = _run(["--outputs", str(_outputs(tmp_path))], session=session)
+    assert code == 1
+    out, err = capsys.readouterr()
+    assert err.strip() == f"seed_airwallex_secret: {shown}"
+    assert out == ""
+    assert CID not in err
+    assert KEY not in err
+    assert "echo" not in err
+
+
+def test_an_error_from_the_stack_lookup_names_that_operation(tmp_path, capsys):
+    class _Denied(_Session):
+        def client(self, name):
+            client = _Client(self, name)
+            if name == "cloudformation":
+
+                def describe_stacks(**kwargs):
+                    raise ClientError(
+                        {"Error": {"Code": "AccessDenied", "Message": "echo"}}, "DescribeStacks"
+                    )
+
+                client.describe_stacks = describe_stacks
+            return client
+
+    outputs = _outputs(tmp_path, region="us-west-2", arn=None)
+    code, session = _run(["--outputs", str(outputs)], session=_Denied())
+    assert code == 1
+    assert _puts(session) == []
+    assert capsys.readouterr().err.strip() == (
+        "seed_airwallex_secret: ClientError (AccessDenied) from DescribeStacks; these "
+        "credentials might not call DescribeStacks; use operator credentials for the deploy "
+        "account"
+    )
+
+
+def test_ctrl_c_during_the_upload_says_the_secret_might_hold_the_new_values(tmp_path, capsys):
     session = _Session(fail=lambda _: KeyboardInterrupt())
     code, _ = _run(["--outputs", str(_outputs(tmp_path))], session=session)
     assert code == 130
-    assert capsys.readouterr().err.strip() == "cancelled; the upload may have completed"
+    assert capsys.readouterr().err.strip() == (
+        "cancelled during the upload; the secret might hold the new values. Run the script "
+        "again to be sure"
+    )
 
 
 def test_the_region_flag_wins_over_the_outputs_file(tmp_path):
@@ -245,7 +378,7 @@ def test_with_no_spine_stack_in_the_region_the_script_refuses(tmp_path, capsys):
     assert code == 2
     assert _puts(session) == []
     err = capsys.readouterr().err
-    assert "no AwxSpine stack in ap-southeast-2: pass --region with the Region" in err
+    assert "no AwxSpine stack in ap-southeast-2; pass --region with the Region" in err
     assert "or seed after the spine stack has deployed" in err
     assert "Traceback" not in err
 
@@ -330,6 +463,36 @@ def test_from_env_reads_the_environment_and_prompts_for_nothing(tmp_path, capsys
     assert environ == {}
     out, err = capsys.readouterr()
     assert CID not in out + err
+
+
+def test_from_env_removes_the_variables_before_the_first_aws_call(tmp_path):
+    environ = {"AWX_CLIENT_ID": CID, "AWX_API_KEY": KEY, "OTHER": "kept"}
+    seen = []
+
+    class _Watching(_Session):
+        def __call__(self, **kwargs):
+            seen.append(("session", sorted(environ)))
+            return super().__call__(**kwargs)
+
+        def client(self, name):
+            seen.append((name, sorted(environ)))
+            return super().client(name)
+
+    outputs = _outputs(tmp_path, region="us-west-2", arn=None)
+    code, session = _run(
+        ["--from-env", "--outputs", str(outputs)],
+        answers=(),
+        environ=environ,
+        session=_Watching(),
+        terminal=False,
+    )
+    assert code == 0
+    assert [name for name, _ in session.calls] == ["describe_stacks", "put_secret_value"]
+    assert seen == [
+        ("session", ["OTHER"]),
+        ("cloudformation", ["OTHER"]),
+        ("secretsmanager", ["OTHER"]),
+    ]
 
 
 def test_from_env_refuses_a_missing_variable(tmp_path, capsys):

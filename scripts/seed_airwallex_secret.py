@@ -42,6 +42,54 @@ class SeedError(Exception):
     """A refusal, reported as one line with no credential value in it."""
 
 
+EXPIRED = "your AWS sign-in has expired; sign in again for that profile and retry"
+INVALID = "the credentials are not valid; check --profile"
+UNREACHABLE = "cannot reach AWS in {region}; check --region"
+DENIED = (
+    "these credentials might not call {operation}; use operator credentials for the deploy account"
+)
+# A fixed next step for each common AWS failure, by exception type or AWS error code. Only the
+# operation name and the Region are filled in.
+ERROR_HINTS = {
+    "NoCredentialsError": (
+        "no AWS credentials found; pass --profile with your operator profile, or sign in for it "
+        "and retry"
+    ),
+    "ProfileNotFound": "the --profile is not in your AWS config; pass a profile that exists",
+    "ExpiredToken": EXPIRED,
+    "ExpiredTokenException": EXPIRED,
+    "TokenRetrievalError": EXPIRED,
+    "UnauthorizedSSOTokenError": EXPIRED,
+    "SSOTokenLoadError": EXPIRED,
+    "AccessDenied": DENIED,
+    "AccessDeniedException": DENIED,
+    "UnrecognizedClientException": INVALID,
+    "InvalidClientTokenId": INVALID,
+    "ResourceNotFoundException": (
+        "no such secret in {region}; check --region, or pass --secret-id <ARN> from the "
+        f"{SPINE_STACK} stack's outputs"
+    ),
+    "EndpointConnectionError": UNREACHABLE,
+    "InvalidRegionError": UNREACHABLE,
+}
+
+
+def error_line(exc: Exception, region: str) -> str:
+    """The exception type, any AWS error code and operation, and a fixed hint. Never the message,
+    which can echo the request."""
+    line = type(exc).__name__
+    hint = ERROR_HINTS.get(line)
+    operation = "this operation"
+    if isinstance(exc, ClientError):
+        code = str(exc.response.get("Error", {}).get("Code", "no error code"))
+        operation = str(exc.operation_name)
+        line += f" ({code}) from {operation}"
+        hint = ERROR_HINTS.get(code, hint)
+    if hint:
+        line += "; " + hint.format(operation=operation, region=region or "the Region")
+    return line
+
+
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--profile", help="the AWS CLI profile to use (the docs use awx-deploy)")
@@ -159,7 +207,7 @@ def resolve_secret_id(
         if exc.response.get("Error", {}).get("Code") != "ValidationError":
             raise
         raise SeedError(
-            f"no {SPINE_STACK} stack in {region}: pass --region with the Region the stacks were "
+            f"no {SPINE_STACK} stack in {region}; pass --region with the Region the stacks were "
             "deployed to, or seed after the spine stack has deployed"
         ) from None
     for output in stacks["Stacks"][0].get("Outputs", []) if stacks["Stacks"] else []:
@@ -225,21 +273,30 @@ def main(
 ) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     uploading = False
+    region = ""
+    environ = os.environ if environ is None else environ
     try:
         outputs = read_outputs(args.outputs)
         region = resolve_region(args.region, outputs, args.outputs)
+        # With --from-env the variables are read and removed before any AWS call, so a
+        # credential process never inherits them. Prompts wait until the secret is resolved,
+        # so a refusal comes before any prompt.
+        values = read_credentials(True, environ, prompt, has_terminal) if args.from_env else None
         session = session_factory(profile_name=args.profile, region_name=region)
         secret_id = resolve_secret_id(args.secret_id, outputs, region, session, args.outputs)
-        values = read_credentials(
-            args.from_env, os.environ if environ is None else environ, prompt, has_terminal
-        )
+        if values is None:
+            values = read_credentials(False, environ, prompt, has_terminal)
         uploading = True
         result = session.client("secretsmanager").put_secret_value(
             SecretId=secret_id, SecretString=json.dumps(values)
         )
     except (KeyboardInterrupt, EOFError):
         if uploading:
-            print("\ncancelled; the upload may have completed", file=sys.stderr)
+            print(
+                "\ncancelled during the upload; the secret might hold the new values. Run the "
+                "script again to be sure",
+                file=sys.stderr,
+            )
         else:
             print("\ncancelled; nothing was uploaded", file=sys.stderr)
         return 130
@@ -247,12 +304,7 @@ def main(
         print(f"seed_airwallex_secret: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:
-        # Print the exception type and any AWS error code, never the message, which can echo
-        # the request.
-        message = type(exc).__name__
-        if isinstance(exc, ClientError):
-            message += f" ({exc.response.get('Error', {}).get('Code', 'no error code')})"
-        print(f"seed_airwallex_secret: {message}", file=sys.stderr)
+        print(f"seed_airwallex_secret: {error_line(exc, region)}", file=sys.stderr)
         return 1
     print(f"seeded {secret_id} in {region} (version {result.get('VersionId', 'unknown')})")
     return 0
