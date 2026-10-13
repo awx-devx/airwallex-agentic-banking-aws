@@ -4,6 +4,7 @@ every account identifier before the model sees the result."""
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from datetime import date
 from typing import Any
 
 from awx_common import Money, ReadRequest
@@ -99,21 +100,33 @@ def read_card_transactions(raw: Mapping[str, Any], ctx: PolicyContext) -> Mappin
     return redact_accounts({"transactions": txns})
 
 
+def due_status(due_on: date, today: date) -> str:
+    """`due_today`, `overdue` or `not_yet_due`: `due_on` compared with the kit's today."""
+    if due_on == today:
+        return "due_today"
+    return "overdue" if due_on < today else "not_yet_due"
+
+
 def read_bridge_position(raw: Mapping[str, Any], ctx: PolicyContext) -> Mapping[str, Any]:
     """This tenant's own bridge position only: no platform capital, headroom, floor or other
     tenant's figures (they would reach the tenant caller), and no account identifiers.
 
     Each queued shortfall carries `due_on`, the due date of the caller's own obligation in the
     current setup. It is None when the setup has no such obligation for the caller, so the
-    agent states a due date only when the kit holds one."""
+    agent states a due date only when the kit holds one.
+
+    `as_of` is the date the kit treats as today (`kit_today`, the date register_shortfall and
+    bridge_shortfall check), and each shortfall's `due_status` compares its `due_on` with it,
+    so the agent never works out a due status itself."""
     from .book import queue_key
-    from .workflow import book_for, current_setup
+    from .workflow import book_for, current_setup, kit_today
 
     strict(raw, {}, {})
     if (refused := _disagrees(ctx)) is not None:
         return refused
     setup = current_setup(ctx)
     book = book_for(ctx, setup)
+    today = kit_today(ctx)
     record = book.tenants.record(ctx.tenant)
     ledger = book.ledger
     tenant_holds = [h for h in ledger.holds() if h.tenant_id == record.tenant_id]
@@ -127,9 +140,11 @@ def read_bridge_position(raw: Mapping[str, Any], ctx: PolicyContext) -> Mapping[
                     "obligation_ref": item.value["obligation_id"],
                     "shortfall": str(item.value["shortfall"]),
                     "due_on": obligation.due_on.isoformat() if own else None,
+                    "due_status": due_status(obligation.due_on, today) if own else None,
                 }
             )
     return {
+        "as_of": today.isoformat(),
         "receivable": str(ledger.receivable(record.tenant_id)),
         "bridges_in_flight": [str(h.amount) for h in tenant_holds],
         "queued_shortfalls": queued,

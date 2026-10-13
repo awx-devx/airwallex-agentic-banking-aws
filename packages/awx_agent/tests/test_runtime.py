@@ -301,8 +301,8 @@ def test_the_prompt_forbids_quoting_values_no_tool_returned():
     from awx_agent.runtime.prompt import system_prompt
 
     p = " ".join(system_prompt("k7").split())
-    assert "that a tool returned in this conversation" in p
-    assert "I could not reach the tools" in p
+    assert "when a tool returned it in this conversation" in p
+    assert "say plainly that you could not reach the tools, and invent nothing" in p
 
 
 def test_the_prompt_says_an_auto_run_has_started():

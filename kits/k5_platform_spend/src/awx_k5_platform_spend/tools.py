@@ -70,8 +70,11 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "read_bridge_position",
         ToolKind.READ,
-        "The customer's own bridge receivable, bridges in flight and queued shortfalls, each "
-        "queued shortfall with its obligation's due date (due_on, null if unknown).",
+        "The customer's own bridge receivable, bridges in flight and queued shortfalls. as_of is "
+        "the date the kit treats as today. Each queued shortfall has its obligation's due date "
+        "(due_on) and a due_status of due_today, overdue or not_yet_due, each null if unknown. "
+        "A queued shortfall is already registered: proposing register_shortfall for it again "
+        "only refreshes its queued amount.",
         _schema({}),
     ),
     ToolSpec(
